@@ -1,32 +1,13 @@
 <!DOCTYPE html>
-<html lang="it">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#3e8bff">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Powerlifting">
-  <title>Scheda Powerlifting</title>
-  <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/coach.jpg">
-  <link rel="icon" href="/coach.jpg">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <main id="app"></main>
-  <nav>
-    <button id="t0" onclick="V('oggi')"> Oggi</button>
-    <button id="t1" onclick="V('piano')"> Piano</button>
-  </nav>
-  <input type="file" id="uploadFile" accept=".docx" style="display:none" onchange="imp(this)">
-  <script src="script.js"></script>
-  <script>
-    // Service Worker + Push
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(console.error);
-    }
-  </script>
-</body>
-</html>
+<html lang="it"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scheda Powerlifting</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<link rel="stylesheet" href="style.css"></head><body>
+<main id="app"></main>
+<nav>
+  <button id="t0" onclick="V('oggi')"> Oggi</button>
+  <button id="t1" onclick="V('piano')">Piano</button>
+</nav>
+<input type="file" id="uploadFile" accept=".docx" style="display:none" onchange="imp(this)">
+<script src="script.js"></script></body></html>

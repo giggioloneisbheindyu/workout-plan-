@@ -1,12 +1,67 @@
 const KEY = 'powerapp_v1', AC = ['#e5484d', '#3e8bff', '#e08a00', '#30a46c'], LN = { s: 'Squat', b: 'Panca', d: 'Stacco' };
 let S = {};
 try { S = JSON.parse(localStorage.getItem(KEY)) || {} } catch (e) { }
-S.max = S.max || { s: 210, b: 110, d: 265 }; S.done = S.done || {}; S.chk = S.chk || {}; S.wi = S.wi || 0; S.view = S.view || 'oggi'; S.time = S.time || '17:00'; S.pushOn = S.pushOn || false;
+S.max = S.max || { s: 210, b: 110, d: 265 }; S.done = S.done || {}; S.chk = S.chk || {}; S.wi = S.wi || 0; S.view = S.view || 'oggi'; S.time = S.time || '17:00'; S.pushOn = S.pushOn || false; S.weekLog = S.weekLog || {};
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)) } catch (e) { } };
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const pad = n => String(n).padStart(2, '0');
 const dstr = (d = new Date()) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+
+const WD = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
+const WD_FULL = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+const MONTHS = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
+/** 0=Lun ... 6=Dom */
+const weekdayMon0 = (d = new Date()) => (d.getDay() + 6) % 7;
+const todayLabel = () => {
+  const d = new Date();
+  return WD_FULL[d.getDay()] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear();
+};
+const logCal = (type, weekLabel, wd = weekdayMon0()) => {
+  S.weekLog = S.weekLog || {};
+  S.weekLog[weekLabel] = S.weekLog[weekLabel] || {};
+  S.weekLog[weekLabel][wd] = type; // 'train' | 'rest'
+};
+const clearCal = (weekLabel, wd = weekdayMon0()) => {
+  if (S.weekLog && S.weekLog[weekLabel]) {
+    delete S.weekLog[weekLabel][wd];
+    if (!Object.keys(S.weekLog[weekLabel]).length) delete S.weekLog[weekLabel];
+  }
+};
+const weekDots = (w) => {
+  const log = (S.weekLog && S.weekLog[w.label]) || {};
+  const labelEsc = String(w.label).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  return `<div class="wdays">${[0,1,2,3,4,5,6].map(i => {
+    const t = log[i];
+    const cls = t === 'train' ? 'train' : t === 'rest' ? 'rest' : '';
+    const mark = t === 'train' ? '✓' : (t === 'rest' ? '–' : '');
+    const isEdit = S.dayEdit && S.dayEdit.week === w.label && S.dayEdit.wd === i;
+    return `<div class="wday ${isEdit ? 'editing' : ''}" onclick="editWday('${labelEsc}',${i},event)"><span class="wl">${WD[i]}</span><span class="dot ${cls}">${mark}</span></div>`;
+  }).join('')}</div>`;
+};
+function editWday(weekLabel, wd, e) {
+  e.stopPropagation();
+  const i = S.prog.weeks.findIndex(w => w.label === weekLabel);
+  if (i >= 0) S.wi = i;
+  S.dayEdit = { week: weekLabel, wd };
+  save(); render();
+}
+function setWday(type) {
+  if (!S.dayEdit) return;
+  const { week, wd } = S.dayEdit;
+  if (type === 'clear') clearCal(week, wd);
+  else logCal(type, week, wd);
+  // Se stai modificando "oggi" e hai un S.today di tipo rest/ask, allinea
+  if (wd === weekdayMon0() && week === (W() && W().label)) {
+    if (type === 'rest') S.today = { date: dstr(), type: 'rest' };
+    else if (type === 'clear') S.today = null;
+    else if (type === 'train') S.today = { date: dstr(), type: 'rest', finished: 1, week, day: null };
+  }
+  S.dayEdit = null;
+  save(); render();
+}
+function cancelDayEdit() { S.dayEdit = null; save(); render(); }
+
 const W = () => S.prog && S.prog.weeks[Math.min(S.wi, S.prog.weeks.length - 1)];
 const days = w => Object.keys(w.days).map(Number).sort((a, b) => a - b);
 const remaining = w => days(w).filter(d => !(S.done[w.label] || []).includes(d));
@@ -52,12 +107,25 @@ async function parseDocx(file) {
   return { weeks };
 }
 async function imp(inp) {
-  try { S.prog = await parseDocx(inp.files[0]); S.wi = 0; S.done = {}; S.chk = {}; S.today = null; save(); render() }
+  try { S.prog = await parseDocx(inp.files[0]); S.wi = 0; S.done = {}; S.chk = {}; S.weekLog = {}; S.today = null; save(); render() }
   catch (e) { $('err').textContent = 'Errore: ' + e.message }
 }
 const coachImg = () => `<div class="coach-wrap"><img src="coach.jpg" alt="Leggi bene – Disciplina oggi, risultati domani" class="coach-img" loading="lazy"></div>`;
 const importCard = () => `<div class="card"><p class="big">Carica la scheda</p><p class="mut">Scegli il file .docx del coach. Viene letto sul tuo telefono.</p><label class="btn pri" style="margin-top:16px;cursor:pointer">Carica file .docx<input type="file" accept=".docx" style="display:none" onchange="imp(this)"></label><p id="err" class="mut"></p></div>${coachImg()}`;
-function setToday(type, day) { S.today = { date: dstr(), type, day }; save(); render() }
+function cambiaOggi() {
+  const w = W();
+  if (w) clearCal(w.label, weekdayMon0());
+  S.today = { date: dstr(), type: 'ask' };
+  save(); render();
+}
+function setToday(type, day) {
+  S.today = { date: dstr(), type, day };
+  if (type === 'rest' && S.prog) {
+    const w = W();
+    if (w) logCal('rest', w.label);
+  }
+  save(); render();
+}
 function askDay() {
   if (S.today && S.today.finished && S.today.week && S.today.day) {
     const wLabel = S.today.week, d = S.today.day;
@@ -66,10 +134,14 @@ function askDay() {
       if (!S.done[wLabel].length) delete S.done[wLabel];
     }
     delete S.chk[wLabel + '|' + d];
+    clearCal(wLabel);
     if (S.prog) {
       const i = S.prog.weeks.findIndex(w => w.label === wLabel);
       if (i >= 0) S.wi = i;
     }
+  } else if (S.today && S.today.type === 'rest' && !S.today.finished && S.prog) {
+    const w = W();
+    if (w) clearCal(w.label);
   }
   S.today = { date: dstr(), type: 'ask' }; save(); render()
 }
@@ -77,6 +149,7 @@ function tg(i) { const w = W(), k = w.label + '|' + S.today.day; const a = S.chk
 function finish() {
   const w = W(), d = S.today.day; (S.done[w.label] = S.done[w.label] || []).push(d);
   const weekLabel = w.label;
+  logCal('train', weekLabel);
   if (!remaining(w).length && S.wi < S.prog.weeks.length - 1) S.wi++;
   S.today = { date: dstr(), type: 'rest', finished: 1, week: weekLabel, day: d }; save(); render()
 }
@@ -84,7 +157,7 @@ function calLink(w, d) {
   const [h, m] = S.time.split(':').map(Number), s = new Date(); s.setHours(h, m, 0, 0); const e = new Date(s.getTime() + 5400000);
   const f = x => x.getFullYear() + pad(x.getMonth() + 1) + pad(x.getDate()) + 'T' + pad(x.getHours()) + pad(x.getMinutes()) + '00';
   const det = w.days[d].filter(x => !x.warm).map(x => x.name + ': ' + x.text.replace(/(\d+(?:[.,]\d+)?)\s*%/g, (mm, p) => x.lift ? p + '% (' + Math.round(parseFloat(p.replace(',', '.')) / 100 * S.max[x.lift] / 2.5) * 2.5 + 'kg)' : mm)).join('\n');
-  return 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' + encodeURIComponent(' ' + focus(w, d) + ' – ' + w.label + ' G' + d) + '&dates=' + f(s) + '/' + f(e) + '&details=' + encodeURIComponent(det);
+  return 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' + encodeURIComponent('🏋️ ' + focus(w, d) + ' – ' + w.label + ' G' + d) + '&dates=' + f(s) + '/' + f(e) + '&details=' + encodeURIComponent(det);
 }
 function oggi() {
   if (!S.prog) return importCard();
@@ -94,16 +167,37 @@ function oggi() {
     const rem = remaining(w);
     const done = tot - rem.length;
     const pct = tot > 0 ? (done / tot) * 100 : 0;
+    const wd = weekdayMon0();
+    const todayLog = (S.weekLog[w.label] || {})[wd];
+
+    // Già risposto oggi → mostra riepilogo invece dei due pulsanti
+    if (todayLog && t && t.type === 'ask') {
+      // forza reset dopo "cambia risposta" che mette type ask dopo clear — se cleared todayLog è vuoto
+    }
+    if (todayLog) {
+      const isTrain = todayLog === 'train';
+      return `<div class="card">
+      <p class="mut">${w.label} · completati ${done} su ${tot}</p>
+      <div class="bar" style="background:var(--pill); margin-top:8px; margin-bottom:20px;">
+        <i style="width:${pct}%; background:var(--ac, #3e8bff)"></i>
+      </div>
+      <p class="date-line">${todayLabel()}</p>
+      <p class="big">${isTrain ? 'Allenamento fatto ✓' : 'Giorno di riposo '}</p>
+      <p class="mut">${isTrain ? 'Oggi ti sei allenato.' : 'Oggi è registrato come riposo.'}</p>
+      <button onclick="cambiaOggi()">Cambia risposta</button>
+    </div>${coachImg()}`
+    }
 
     return `<div class="card">
       <p class="mut">${w.label} · completati ${done} su ${tot}</p>
       <div class="bar" style="background:var(--pill); margin-top:8px; margin-bottom:20px;">
         <i style="width:${pct}%; background:var(--ac, #3e8bff)"></i>
       </div>
+      <p class="date-line">${todayLabel()}</p>
       <p class="big">Che giorno è oggi?</p>
       <div class="row">
-        <button onclick="setToday('rest')"> Riposo</button>
-        <button onclick="S.today={date:dstr(),type:'pick'};save();render()"> Allenamento</button>
+        <button onclick="setToday('rest')">Riposo</button>
+        <button onclick="S.today={date:dstr(),type:'pick'};save();render()">Allenamento</button>
       </div>
     </div>${coachImg()}`}
   if (t.type === 'pick') {
@@ -113,12 +207,12 @@ function oggi() {
   if (t.type === 'rest') return `<div class="card"><p class="big">${t.finished ? 'Allenamento fatto ✓' : 'Giorno di riposo '}</p><p class="mut">Prossimo: ${w.label}${remaining(w).length ? ' · giorno ' + remaining(w)[0] : ''}</p>
   <div class="row">
     <button onclick="askDay()">Cambia risposta</button>
-    <button class="pri" onclick="S.today=null;save();render()">Torna alla home</button>
+    <button class="pri" onclick="S.today=null;save();render()"> Torna alla home</button>
   </div></div>${coachImg()}`;
   const d = t.day, ex = w.days[d], k = w.label + '|' + d, ck = S.chk[k] || [], left = ex.length - ck.length, ac = AC[(d - 1) % 4];
   return `<div style="--ac:${ac}"><div class="hero"><div class="mut">${w.label} · GIORNO ${d}</div><p class="big">${focus(w, d)}</p><div class="mut">${ck.length}/${ex.length} esercizi fatti</div><div class="bar"><i style="width:${ck.length / ex.length * 100}%"></i></div></div>
   ${ex.map((e, i) => `<div class="ex ${e.warm ? 'w' : ''} ${e.lift ? 'main' : ''} ${ck.includes(i) ? 'ok' : ''}" onclick="tg(${i})"><div class="n">${ck.includes(i) ? '✓' : i + 1}</div><div><div class="nm">${esc(e.name)}</div><div class="dt">${fmt(e.text, e.lift)}</div></div></div>`).join('')}
-  <div class="card"><label>Orario allenamento</label><input type="time" value="${S.time}" onchange="if(this.value){S.time=this.value;save();render()}else{this.value=S.time}"><a class="btn" target="_blank" rel="noopener" href="${calLink(w, d)}"> Aggiungi al calendario</a></div>
+  <div class="card"><label>Orario allenamento</label><input type="time" value="${S.time}" onchange="if(this.value){S.time=this.value;save();render()}else{this.value=S.time}"><a class="btn" target="_blank" rel="noopener" href="${calLink(w, d)}">Aggiungi al calendario</a></div>
   <button class="pri" style="background:${ac};color:#fff" ${left ? 'disabled' : ''} onclick="finish()">${left ? 'Mancano ' + left + ' esercizi' : 'Allenamento finito ✓'}</button>
   ${left ? `<button onclick="finish()">Segna finito comunque</button>` : ''}
   <button onclick="askDay()">Cambia giorno</button>
@@ -142,9 +236,20 @@ function piano() {
   if (!S.prog) return importCard();
   const m = S.max;
   const pushBtn = S.pushOn
-    ? `<button onclick="disablePush()"> Disattiva notifiche</button><button onclick="testPush()"> Invia notifica di prova</button>`
+    ? `<button onclick="disablePush()"> Disattiva notifiche</button><button onclick="testPush()">Invia notifica di prova</button>`
     : `<button class="pri" onclick="enablePush()"> Attiva notifiche</button>`;
-  return `<h1>Massimali (kg)</h1><div class="card"><div class="row">
+  const editCard = S.dayEdit ? (() => {
+    const name = WD[S.dayEdit.wd];
+    const cur = ((S.weekLog || {})[S.dayEdit.week] || {})[S.dayEdit.wd];
+    const curTxt = cur === 'train' ? 'allenamento' : cur === 'rest' ? 'riposo' : 'non registrato';
+    return `<div class="card edit-day"><p class="big">Modifica ${name}</p><p class="mut">${esc(S.dayEdit.week)} · ora: ${curTxt}</p>
+      <button class="pri" style="background:#e5484d;color:#fff" onclick="setWday('train')"> Allenamento</button>
+      <button class="pri" style="background:#3e8bff;color:#fff" onclick="setWday('rest')"> Riposo</button>
+      <button onclick="setWday('clear')">Cancella</button>
+      <button onclick="cancelDayEdit()">Annulla</button>
+    </div>`;
+  })() : '';
+  return `${editCard}<h1>Massimali (kg)</h1><div class="card"><div class="row">
   <div><label>Squat</label><input type="number" inputmode="decimal" min="1" step="0.5" value="${m.s}" onchange="updateMax('s', this)"></div>
   <div><label>Panca</label><input type="number" inputmode="decimal" min="1" step="0.5" value="${m.b}" onchange="updateMax('b', this)"></div>
   <div><label>Stacco</label><input type="number" inputmode="decimal" min="1" step="0.5" value="${m.d}" onchange="updateMax('d', this)"></div>
@@ -154,8 +259,8 @@ function piano() {
     <p class="mut" style="margin-bottom:12px">Promemoria ogni mattina alle ~7:00. Su iPhone: aggiungi l'app alla Home Screen da Safari, poi attiva qui.</p>
     ${pushBtn}
   </div>
-  <h1>Settimane</h1>${S.prog.weeks.map((w, i) => `<div class="wk ${i === S.wi ? 'cur' : ''}" onclick="S.wi=${i};save();render()"><b>${esc(w.label)}</b>${days(w).map(d => `<span class="dot ${(S.done[w.label] || []).includes(d) ? 'd' : ''}">${(S.done[w.label] || []).includes(d) ? '✓' : d}</span>`).join('')}<button class="res-btn" onclick="resetWk('${w.label}', event)">❌</button></div>`).join('')}
-  <p class="mut">Tocca una settimana per impostarla come corrente. Avanza da sola quando chiudi tutti gli allenamenti.</p>
+  <h1>Settimane</h1>${S.prog.weeks.map((w, i) => `<div class="wk ${i === S.wi ? 'cur' : ''}" onclick="S.wi=${i};save();render()"><div class="wk-top"><b>${esc(w.label)}</b><button class="res-btn" onclick="resetWk('${w.label}', event)">❌</button></div>${weekDots(w)}</div>`).join('')}
+  <p class="mut">Tocca un giorno (Lun–Dom) per impostare allenamento o riposo. Rosso = allenamento · blu = riposo · grigio = non registrato.</p>
   <h1>Nuova scheda</h1><div class="card"><label class="btn" style="margin:0;cursor:pointer">🔄 Cambia file della scheda<input type="file" accept=".docx" style="display:none" onchange="imp(this)"></label><p id="err" class="mut"></p></div>`;
 }
 function resetWk(label, e) {
@@ -163,6 +268,7 @@ function resetWk(label, e) {
   if (confirm('Attenzione: Vuoi davvero resettare gli allenamenti per la settimana ' + label + '?')) {
     if (confirm('Sei ASSOLUTAMENTE sicuro? Questa operazione non può essere annullata e perderai i progressi della settimana.')) {
       if (S.done[label]) delete S.done[label];
+      if (S.weekLog && S.weekLog[label]) delete S.weekLog[label];
       Object.keys(S.chk).forEach(k => { if (k.startsWith(label + '|')) delete S.chk[k] });
       save();
       render();
