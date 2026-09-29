@@ -1,0 +1,18 @@
+{
+  "name": "Scheda Powerlifting",
+  "short_name": "Powerlifting",
+  "description": "La tua scheda di powerlifting sempre a portata di mano",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0e0e12",
+  "theme_color": "#3e8bff",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/coach.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    }
+  ]
+}

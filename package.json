@@ -1,0 +1,9 @@
+{
+  "name": "scheda-powerlifting",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "web-push": "^3.6.7",
+    "@upstash/redis": "^1.34.0"
+  }
+}
