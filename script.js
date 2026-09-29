@@ -84,7 +84,7 @@ function calLink(w, d) {
   const [h, m] = S.time.split(':').map(Number), s = new Date(); s.setHours(h, m, 0, 0); const e = new Date(s.getTime() + 5400000);
   const f = x => x.getFullYear() + pad(x.getMonth() + 1) + pad(x.getDate()) + 'T' + pad(x.getHours()) + pad(x.getMinutes()) + '00';
   const det = w.days[d].filter(x => !x.warm).map(x => x.name + ': ' + x.text.replace(/(\d+(?:[.,]\d+)?)\s*%/g, (mm, p) => x.lift ? p + '% (' + Math.round(parseFloat(p.replace(',', '.')) / 100 * S.max[x.lift] / 2.5) * 2.5 + 'kg)' : mm)).join('\n');
-  return 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' + encodeURIComponent('🏋️ ' + focus(w, d) + ' – ' + w.label + ' G' + d) + '&dates=' + f(s) + '/' + f(e) + '&details=' + encodeURIComponent(det);
+  return 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' + encodeURIComponent(' ' + focus(w, d) + ' – ' + w.label + ' G' + d) + '&dates=' + f(s) + '/' + f(e) + '&details=' + encodeURIComponent(det);
 }
 function oggi() {
   if (!S.prog) return importCard();
@@ -102,27 +102,27 @@ function oggi() {
       </div>
       <p class="big">Che giorno è oggi?</p>
       <div class="row">
-        <button onclick="setToday('rest')">😴 Riposo</button>
-        <button onclick="S.today={date:dstr(),type:'pick'};save();render()">💪 Allenamento</button>
+        <button onclick="setToday('rest')"> Riposo</button>
+        <button onclick="S.today={date:dstr(),type:'pick'};save();render()"> Allenamento</button>
       </div>
     </div>${coachImg()}`}
   if (t.type === 'pick') {
     const rem = remaining(w);
-    return `<div class="card"><p class="big">Quale allenamento?</p><p class="mut">${w.label} · quelli che ti restano</p>${rem.map(d => `<button style="border-left:8px solid ${AC[(d - 1) % 4]}" onclick="setToday('train',${d})">Giorno ${d} — ${focus(w, d)}</button>`).join('') || '<p>Settimana completata 🎉</p>'}<button onclick="askDay()">← Indietro</button><button onclick="S.today=null;save();render()">🏠 Torna alla home</button></div>${coachImg()}`
+    return `<div class="card"><p class="big">Quale allenamento?</p><p class="mut">${w.label} · quelli che ti restano</p>${rem.map(d => `<button style="border-left:8px solid ${AC[(d - 1) % 4]}" onclick="setToday('train',${d})">Giorno ${d} — ${focus(w, d)}</button>`).join('') || '<p>Settimana completata </p>'}<button onclick="askDay()">← Indietro</button><button onclick="S.today=null;save();render()"> Torna alla home</button></div>${coachImg()}`
   }
-  if (t.type === 'rest') return `<div class="card"><p class="big">${t.finished ? 'Allenamento fatto ✓' : 'Giorno di riposo 😴'}</p><p class="mut">Prossimo: ${w.label}${remaining(w).length ? ' · giorno ' + remaining(w)[0] : ''}</p>
+  if (t.type === 'rest') return `<div class="card"><p class="big">${t.finished ? 'Allenamento fatto ✓' : 'Giorno di riposo '}</p><p class="mut">Prossimo: ${w.label}${remaining(w).length ? ' · giorno ' + remaining(w)[0] : ''}</p>
   <div class="row">
     <button onclick="askDay()">Cambia risposta</button>
-    <button class="pri" onclick="S.today=null;save();render()">🏠 Torna alla home</button>
+    <button class="pri" onclick="S.today=null;save();render()">Torna alla home</button>
   </div></div>${coachImg()}`;
   const d = t.day, ex = w.days[d], k = w.label + '|' + d, ck = S.chk[k] || [], left = ex.length - ck.length, ac = AC[(d - 1) % 4];
   return `<div style="--ac:${ac}"><div class="hero"><div class="mut">${w.label} · GIORNO ${d}</div><p class="big">${focus(w, d)}</p><div class="mut">${ck.length}/${ex.length} esercizi fatti</div><div class="bar"><i style="width:${ck.length / ex.length * 100}%"></i></div></div>
   ${ex.map((e, i) => `<div class="ex ${e.warm ? 'w' : ''} ${e.lift ? 'main' : ''} ${ck.includes(i) ? 'ok' : ''}" onclick="tg(${i})"><div class="n">${ck.includes(i) ? '✓' : i + 1}</div><div><div class="nm">${esc(e.name)}</div><div class="dt">${fmt(e.text, e.lift)}</div></div></div>`).join('')}
-  <div class="card"><label>Orario allenamento</label><input type="time" value="${S.time}" onchange="if(this.value){S.time=this.value;save();render()}else{this.value=S.time}"><a class="btn" target="_blank" rel="noopener" href="${calLink(w, d)}">📅 Aggiungi al calendario</a></div>
+  <div class="card"><label>Orario allenamento</label><input type="time" value="${S.time}" onchange="if(this.value){S.time=this.value;save();render()}else{this.value=S.time}"><a class="btn" target="_blank" rel="noopener" href="${calLink(w, d)}"> Aggiungi al calendario</a></div>
   <button class="pri" style="background:${ac};color:#fff" ${left ? 'disabled' : ''} onclick="finish()">${left ? 'Mancano ' + left + ' esercizi' : 'Allenamento finito ✓'}</button>
   ${left ? `<button onclick="finish()">Segna finito comunque</button>` : ''}
   <button onclick="askDay()">Cambia giorno</button>
-  <button onclick="S.today=null;save();render()">🏠 Torna alla home</button>
+  <button onclick="S.today=null;save();render()"> Torna alla home</button>
   ${coachImg()}</div>`;
 }
 
@@ -142,8 +142,8 @@ function piano() {
   if (!S.prog) return importCard();
   const m = S.max;
   const pushBtn = S.pushOn
-    ? `<button onclick="disablePush()">🔕 Disattiva notifiche</button><button onclick="testPush()">🔔 Invia notifica di prova</button>`
-    : `<button class="pri" onclick="enablePush()">🔔 Attiva notifiche</button>`;
+    ? `<button onclick="disablePush()"> Disattiva notifiche</button><button onclick="testPush()"> Invia notifica di prova</button>`
+    : `<button class="pri" onclick="enablePush()"> Attiva notifiche</button>`;
   return `<h1>Massimali (kg)</h1><div class="card"><div class="row">
   <div><label>Squat</label><input type="number" inputmode="decimal" min="1" step="0.5" value="${m.s}" onchange="updateMax('s', this)"></div>
   <div><label>Panca</label><input type="number" inputmode="decimal" min="1" step="0.5" value="${m.b}" onchange="updateMax('b', this)"></div>
@@ -221,7 +221,7 @@ async function enablePush() {
     if (!res.ok) throw new Error((await res.json()).error || 'Errore server');
     S.pushOn = true;
     save();
-    alert('✅ Notifiche attivate! Riceverai un promemoria ogni mattina.');
+    alert(' Notifiche attivate! Riceverai un promemoria ogni mattina.');
     render();
   } catch (e) {
     console.error(e);
@@ -253,8 +253,8 @@ async function disablePush() {
 async function testPush() {
   try {
     const reg = await navigator.serviceWorker.ready;
-    await reg.showNotification('🏋️ Scheda Powerlifting', {
-      body: 'Notifica di prova! Tutto funziona 💪',
+    await reg.showNotification(' Scheda Powerlifting', {
+      body: 'Notifica di prova! Tutto funziona ',
       icon: '/coach.jpg',
       badge: '/coach.jpg',
       tag: 'test'
