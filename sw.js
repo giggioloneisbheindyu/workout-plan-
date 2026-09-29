@@ -31,6 +31,7 @@ self.addEventListener('push', (event) => {
       badge: data.badge || '/coach.jpg',
       tag: data.tag || 'allenamento',
       renotify: true,
+      requireInteraction: true,
       data: { url: data.url || '/' }
     })
   );

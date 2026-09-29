@@ -36,6 +36,12 @@ export default async function handler(req, res) {
       tag: 'allenamento-mattina'
     });
 
+    // urgency: high = consegna prioritaria (max consentito da Web Push / iOS)
+    const pushOptions = {
+      urgency: 'high',
+      TTL: 60 * 60 * 12 // 12 ore
+    };
+
     let sent = 0;
     let failed = 0;
     const dead = [];
@@ -48,7 +54,7 @@ export default async function handler(req, res) {
           continue;
         }
         const sub = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        await webpush.sendNotification(sub, payload);
+        await webpush.sendNotification(sub, payload, pushOptions);
         sent++;
       } catch (err) {
         failed++;
