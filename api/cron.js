@@ -27,14 +27,21 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, sent: 0, message: 'No subscribers' });
     }
 
+    // Testo un po' più ricco + immagine (su Android si vede grande; su iOS all'espansione)
     const payload = JSON.stringify({
       title: '🏋️ Scheda Powerlifting',
-      body: 'È ora di allenarsi! Apri l\'app e guarda cosa ti aspetta oggi.',
+      body: 'È ora di allenarsi!\nApri l\'app e guarda squat, panca e stacco di oggi.\nDisciplina oggi → risultati domani.',
       icon: '/coach.jpg',
       badge: '/coach.jpg',
-      url: '/',
+      image: '/coach.jpg',
+      url: '/?prompt=1',
       tag: 'allenamento-mattina'
     });
+
+    const pushOptions = {
+      urgency: 'high',
+      TTL: 60 * 60 * 12
+    };
 
     let sent = 0;
     let failed = 0;
@@ -48,7 +55,7 @@ export default async function handler(req, res) {
           continue;
         }
         const sub = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        await webpush.sendNotification(sub, payload);
+        await webpush.sendNotification(sub, payload, pushOptions);
         sent++;
       } catch (err) {
         failed++;

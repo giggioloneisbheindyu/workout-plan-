@@ -85,3 +85,16 @@ npx vercel dev
 ```
 
 (Serve comunque Redis e le env vars.)
+
+
+## Hevy (opzionale)
+
+1. Abbonamento **Hevy Pro**
+2. API key: https://hevy.com/settings?developer
+3. Su Vercel → Project → Settings → Environment Variables:
+   - `HEVY_API_KEY` = la tua chiave
+4. Redeploy
+5. In allenamento compila **kg / rip / RPE** sotto ogni esercizio
+6. A fine sessione: **Invia a Hevy**
+
+Su Apple Watch, a inizio allenamento: **Allenamento → Forza** (per FC/calorie in Salute).
