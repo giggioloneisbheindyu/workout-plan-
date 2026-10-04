@@ -1,7 +1,7 @@
 const KEY = 'powerapp_v1', AC = ['#e5484d', '#3e8bff', '#e08a00', '#30a46c'], LN = { s: 'Squat', b: 'Panca', d: 'Stacco' };
 let S = {};
 try { S = JSON.parse(localStorage.getItem(KEY)) || {} } catch (e) { }
-S.max = S.max || { s: 210, b: 110, d: 265 }; S.done = S.done || {}; S.chk = S.chk || {}; S.wi = S.wi || 0; S.view = S.view || 'oggi'; S.time = S.time || '17:00'; S.pushOn = S.pushOn || false; S.weekLog = S.weekLog || {}; S.promptedDate = S.promptedDate || null; S.dayModal = S.dayModal || null; S.accLog = S.accLog || {}; S.liftHistory = S.liftHistory || {}; S.restByEx = S.restByEx || {}; S.restDefault = S.restDefault || 120; S.restPicker = S.restPicker || null;
+S.max = S.max || { s: 210, b: 110, d: 265 }; S.done = S.done || {}; S.chk = S.chk || {}; S.wi = S.wi || 0; S.view = S.view || 'oggi'; S.time = S.time || '17:00'; S.pushOn = S.pushOn || false; S.weekLog = S.weekLog || {}; S.promptedDate = S.promptedDate || null; S.dayModal = S.dayModal || null; S.accLog = S.accLog || {}; S.liftHistory = S.liftHistory || {}; S.restByEx = S.restByEx || {}; S.restDefault = S.restDefault || 120; S.restPicker = S.restPicker || null; S.workoutLog = S.workoutLog || [];
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)) } catch (e) { } };
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -27,7 +27,7 @@ const logDayNum = (entry) => {
   return entry.day != null ? entry.day : null;
 };
 const logCal = (type, weekLabel, wd = weekdayMon0(), day = null) => {
-  S.weekLog = S.weekLog || {}; S.promptedDate = S.promptedDate || null; S.dayModal = S.dayModal || null; S.accLog = S.accLog || {}; S.liftHistory = S.liftHistory || {}; S.restByEx = S.restByEx || {}; S.restDefault = S.restDefault || 120; S.restPicker = S.restPicker || null;
+  S.weekLog = S.weekLog || {};
   S.weekLog[weekLabel] = S.weekLog[weekLabel] || {};
   if (type === 'train') S.weekLog[weekLabel][wd] = { type: 'train', day };
   else S.weekLog[weekLabel][wd] = { type: 'rest' };
@@ -68,6 +68,8 @@ function setWday(type) {
   if (!S.dayEdit) return;
   const { week, wd } = S.dayEdit;
   if (type === 'clear') {
+    if (!confirm('Vuoi cancellare la registrazione di questo giorno?')) return;
+    if (!confirm('Confermi? L\'operazione non si può annullare.')) return;
     clearCal(week, wd);
     if (wd === weekdayMon0() && week === (W() && W().label)) S.today = null;
     S.dayEdit = null;
@@ -139,6 +141,50 @@ function setRestSec(name, sec) {
   S.restByEx[liftKey(name)] = n;
   save();
 }
+function getAccLog(week, day, i) {
+  const k = week + '|' + day;
+  S.accLog = S.accLog || {};
+  S.accLog[k] = S.accLog[k] || {};
+  S.accLog[k][i] = S.accLog[k][i] || { kg: '', reps: '' };
+  return S.accLog[k][i];
+}
+function setAccLog(week, day, i, field, value) {
+  const row = getAccLog(week, day, i);
+  row[field] = value;
+  save();
+}
+function pushLiftHistory(name, kg, reps, week, day) {
+  if (kg === '' || kg == null || reps === '' || reps == null) return;
+  const kgN = parseFloat(String(kg).replace(',', '.'));
+  const repsN = parseInt(reps, 10);
+  if (isNaN(kgN) || isNaN(repsN)) return;
+  const key = liftKey(name);
+  S.liftHistory = S.liftHistory || {};
+  S.liftHistory[key] = S.liftHistory[key] || [];
+  S.liftHistory[key] = S.liftHistory[key].filter(h => h.date !== dstr());
+  S.liftHistory[key].unshift({ date: dstr(), kg: kgN, reps: repsN, week: week || '', day: day });
+  if (S.liftHistory[key].length > 40) S.liftHistory[key].length = 40;
+}
+function lastLiftHistory(name, n) {
+  const list = (S.liftHistory && S.liftHistory[liftKey(name)]) || [];
+  return list.slice(0, n || 5);
+}
+function historyHtml(name) {
+  const rows = lastLiftHistory(name, 5);
+  if (!rows.length) return '<p class="hist mut">Nessuno storico ancora</p>';
+  return '<div class="hist">' + rows.map(h =>
+    `<span class="hist-row"><b>${h.kg} kg</b> × ${h.reps} <i>${esc(h.date).slice(5)}</i></span>`
+  ).join('') + '</div>';
+}
+function saveSessionLogs(week, day, exercises) {
+  if (!exercises) return;
+  exercises.forEach((e, i) => {
+    if (!isAccessory(e)) return;
+    const log = getAccLog(week, day, i);
+    pushLiftHistory(e.name, log.kg, log.reps, week, day);
+  });
+  save();
+}
 /** secondi → "HH:MM:SS" per input type=time */
 function secToTimeValue(sec) {
   sec = Math.max(0, Math.min(600, parseInt(sec, 10) || 0));
@@ -155,166 +201,184 @@ function timeValueToSec(val) {
   else if (p.length === 2) sec = (p[0] || 0) * 60 + (p[1] || 0);
   return Math.max(15, Math.min(600, sec || 120));
 }
-function openRestPicker(name) {
-  S.restPicker = { name: name, sec: getRestSec(name) };
-  save();
+
+
+function openRestPicker(name, ev) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+  S.restPicker = { name: String(name || ''), sec: getRestSec(name) };
+  // non salvare subito: evita race; salviamo al confirm
   render();
-  // Apri il selettore nativo appena il DOM è pronto
-  requestAnimationFrame(() => {
-    const inp = document.getElementById('rest-time-input');
-    if (!inp) return;
-    try {
-      if (typeof inp.showPicker === 'function') inp.showPicker();
-      else { inp.focus(); inp.click(); }
-    } catch (e) {
-      try { inp.focus(); } catch (e2) {}
-    }
-  });
 }
-function closeRestPicker() {
+function closeRestPicker(ev) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
   S.restPicker = null;
-  save();
   render();
 }
-function confirmRestPicker() {
+function adjustRestPicker(delta, ev) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
   if (!S.restPicker) return;
-  const inp = document.getElementById('rest-time-input');
-  const sec = inp ? timeValueToSec(inp.value) : S.restPicker.sec;
-  setRestSec(S.restPicker.name, sec);
+  S.restPicker.sec = Math.max(15, Math.min(600, (Number(S.restPicker.sec) || 120) + delta));
+  const el = document.getElementById('rest-picker-sec');
+  if (el) el.textContent = fmtRest(S.restPicker.sec);
+}
+function setRestPickerPreset(sec, ev) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+  if (!S.restPicker) return;
+  S.restPicker.sec = sec;
+  const el = document.getElementById('rest-picker-sec');
+  if (el) el.textContent = fmtRest(sec);
+}
+function confirmRestPicker(ev) {
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+  if (!S.restPicker) return;
+  setRestSec(S.restPicker.name, S.restPicker.sec);
   S.restPicker = null;
   save();
   render();
 }
 function restPickerHtml() {
   if (!S.restPicker) return '';
-  const sec = S.restPicker.sec;
+  const sec = S.restPicker.sec || 120;
   const name = S.restPicker.name;
-  return `<div class="modal-backdrop rest-picker-backdrop" onclick="closeRestPicker()">
+  return `<div class="modal-backdrop rest-picker-backdrop" onclick="closeRestPicker(event)">
     <div class="modal-card rest-picker-card" onclick="event.stopPropagation()">
       <p class="big">Tempo di recupero</p>
-      <p class="mut" style="margin-bottom:12px">${esc(name)}</p>
-      <label class="rest-picker-label">Durata
-        <input id="rest-time-input" type="time" step="1" value="${secToTimeValue(sec)}"
-          onchange="S.restPicker.sec=timeValueToSec(this.value)">
-      </label>
-      <div class="rest-presets">
-        <button type="button" onclick="document.getElementById('rest-time-input').value=secToTimeValue(60);S.restPicker.sec=60">1:00</button>
-        <button type="button" onclick="document.getElementById('rest-time-input').value=secToTimeValue(90);S.restPicker.sec=90">1:30</button>
-        <button type="button" onclick="document.getElementById('rest-time-input').value=secToTimeValue(120);S.restPicker.sec=120">2:00</button>
-        <button type="button" onclick="document.getElementById('rest-time-input').value=secToTimeValue(180);S.restPicker.sec=180">3:00</button>
-        <button type="button" onclick="document.getElementById('rest-time-input').value=secToTimeValue(240);S.restPicker.sec=240">4:00</button>
-        <button type="button" onclick="document.getElementById('rest-time-input').value=secToTimeValue(300);S.restPicker.sec=300">5:00</button>
+      <p class="mut" style="margin-bottom:8px">${esc(name)}</p>
+      <div class="rest-stepper">
+        <button type="button" class="rest-step-btn" onclick="adjustRestPicker(-15,event)">−15s</button>
+        <div id="rest-picker-sec" class="rest-picker-sec">${fmtRest(sec)}</div>
+        <button type="button" class="rest-step-btn" onclick="adjustRestPicker(15,event)">+15s</button>
       </div>
-      <button class="pri" onclick="confirmRestPicker()">Salva</button>
-      <button onclick="closeRestPicker()">Annulla</button>
+      <div class="rest-stepper" style="margin-top:8px">
+        <button type="button" class="rest-step-btn" onclick="adjustRestPicker(-60,event)">−1 min</button>
+        <button type="button" class="rest-step-btn" onclick="adjustRestPicker(60,event)">+1 min</button>
+      </div>
+      <div class="rest-presets">
+        <button type="button" onclick="setRestPickerPreset(60,event)">1:00</button>
+        <button type="button" onclick="setRestPickerPreset(90,event)">1:30</button>
+        <button type="button" onclick="setRestPickerPreset(120,event)">2:00</button>
+        <button type="button" onclick="setRestPickerPreset(180,event)">3:00</button>
+        <button type="button" onclick="setRestPickerPreset(240,event)">4:00</button>
+        <button type="button" onclick="setRestPickerPreset(300,event)">5:00</button>
+      </div>
+      <button type="button" class="pri" onclick="confirmRestPicker(event)">Salva</button>
+      <button type="button" onclick="closeRestPicker(event)">Annulla</button>
     </div>
   </div>`;
 }
-function getAccLog(week, day, i) {
-  const k = week + '|' + day;
-  S.accLog = S.accLog || {};
-  S.accLog[k] = S.accLog[k] || {};
-  S.accLog[k][i] = S.accLog[k][i] || { kg: '', reps: '' };
-  return S.accLog[k][i];
-}
-function setAccLog(week, day, i, field, value) {
-  const row = getAccLog(week, day, i);
-  row[field] = value;
-  save();
-}
-/** Storico nel tempo per esercizio complementare */
-function pushLiftHistory(name, kg, reps, week, day) {
-  if (kg === '' || kg == null || reps === '' || reps == null) return;
-  const kgN = parseFloat(String(kg).replace(',', '.'));
-  const repsN = parseInt(reps, 10);
-  if (isNaN(kgN) || isNaN(repsN)) return;
-  const key = liftKey(name);
-  S.liftHistory = S.liftHistory || {};
-  S.liftHistory[key] = S.liftHistory[key] || [];
-  // evita doppione stesso giorno
-  S.liftHistory[key] = S.liftHistory[key].filter(h => h.date !== dstr());
-  S.liftHistory[key].unshift({
-    date: dstr(),
-    kg: kgN,
-    reps: repsN,
-    week: week || '',
-    day: day,
-  });
-  // tieni ultimi 40
-  if (S.liftHistory[key].length > 40) S.liftHistory[key].length = 40;
-}
-function lastLiftHistory(name, n) {
-  const list = (S.liftHistory && S.liftHistory[liftKey(name)]) || [];
-  return list.slice(0, n || 5);
-}
-function historyHtml(name) {
-  const rows = lastLiftHistory(name, 5);
-  if (!rows.length) return '<p class="hist mut">Nessuno storico ancora</p>';
-  return '<div class="hist">' + rows.map(h =>
-    `<span class="hist-row"><b>${h.kg} kg</b> × ${h.reps} <i>${h.date.slice(5)}</i></span>`
-  ).join('') + '</div>';
-}
-function saveSessionLogs(week, day, exercises) {
-  if (!exercises) return;
-  exercises.forEach((e, i) => {
-    if (!isAccessory(e)) return;
-    const log = getAccLog(week, day, i);
-    pushLiftHistory(e.name, log.kg, log.reps, week, day);
-  });
-  save();
-}
 
-/* ---- Timer recupero ---- */
-let _restTimer = null; // { endsAt, name, left }
-function startRest(name) {
-  const sec = getRestSec(name);
-  if (_restTimer && _restTimer._iv) clearInterval(_restTimer._iv);
-  _restTimer = { endsAt: Date.now() + sec * 1000, name, left: sec };
+/* ---- Timer recupero + suono/notifica ---- */
+let _restTimer = null;
+function playRestBeep() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const now = ctx.currentTime;
+    [0, 0.22, 0.44].forEach((off, i) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.value = i === 2 ? 880 : 660;
+      g.gain.setValueAtTime(0.0001, now + off);
+      g.gain.exponentialRampToValueAtTime(0.25, now + off + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + off + 0.18);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(now + off);
+      o.stop(now + off + 0.2);
+    });
+    setTimeout(() => { try { ctx.close(); } catch (e) {} }, 1200);
+  } catch (e) {}
+}
+async function notifyRestDone(name) {
+  try {
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'default') {
+      try { await Notification.requestPermission(); } catch (e) {}
+    }
+    if (Notification.permission === 'granted') {
+      const opts = {
+        body: 'Recupero terminato · ' + (name || 'prossimo set'),
+        icon: '/coach.jpg',
+        badge: '/coach.jpg',
+        tag: 'rest-timer',
+        renotify: true,
+      };
+      try {
+        const reg = ('serviceWorker' in navigator) ? await navigator.serviceWorker.ready : null;
+        if (reg && reg.showNotification) reg.showNotification('⏱ Recupero finito', opts);
+        else new Notification('⏱ Recupero finito', opts);
+      } catch (e) {
+        try { new Notification('⏱ Recupero finito', opts); } catch (e2) {}
+      }
+    }
+  } catch (e) {}
+}
+function onRestFinished() {
+  playRestBeep();
+  try { if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 400]); } catch (e) {}
+  notifyRestDone(_restTimer && _restTimer.name);
+  const el = document.getElementById('rest-timer-display');
+  if (el) { el.textContent = 'Fine!'; el.classList.add('done'); }
+  const bar = document.querySelector('.rest-bar');
+  if (bar) bar.classList.add('done');
+  const btn = document.querySelector('.rest-stop');
+  if (btn) btn.textContent = 'Chiudi';
+}
+function startRest(name, ev) {
+  if (ev) { try { ev.stopPropagation(); ev.preventDefault(); } catch (e) {} }
+  const sec = getRestSec(name) || 120;
+  if (_restTimer && _restTimer._iv) {
+    clearInterval(_restTimer._iv);
+    _restTimer._iv = null;
+  }
+  _restTimer = { endsAt: Date.now() + sec * 1000, name: String(name || ''), left: sec };
   const tick = () => {
     if (!_restTimer) return;
     _restTimer.left = Math.max(0, Math.ceil((_restTimer.endsAt - Date.now()) / 1000));
     const el = document.getElementById('rest-timer-display');
     if (el) {
-      const m = Math.floor(_restTimer.left / 60);
-      const s = _restTimer.left % 60;
-      el.textContent = m + ':' + String(s).padStart(2, '0');
-      if (_restTimer.left <= 0) {
-        el.classList.add('done');
-        try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) {}
-        clearInterval(_restTimer._iv);
+      if (_restTimer.left > 0) {
+        const m = Math.floor(_restTimer.left / 60);
+        const s = _restTimer.left % 60;
+        el.textContent = m + ':' + String(s).padStart(2, '0');
+        el.classList.remove('done');
       }
-    } else if (_restTimer.left <= 0) {
-      clearInterval(_restTimer._iv);
+    }
+    if (_restTimer.left <= 0) {
+      if (_restTimer._iv) { clearInterval(_restTimer._iv); _restTimer._iv = null; }
+      onRestFinished();
     }
   };
-  _restTimer._iv = setInterval(tick, 250);
-  tick();
+  _restTimer._iv = setInterval(tick, 200);
   render();
+  tick();
 }
-function stopRest() {
+function stopRest(ev) {
+  if (ev) { try { ev.stopPropagation(); ev.preventDefault(); } catch (e) {} }
   if (_restTimer && _restTimer._iv) clearInterval(_restTimer._iv);
   _restTimer = null;
   render();
 }
 function restBarHtml() {
   if (!_restTimer) return '';
-  const m = Math.floor(_restTimer.left / 60);
-  const s = _restTimer.left % 60;
-  const done = _restTimer.left <= 0;
-  return `<div class="rest-bar ${done ? 'done' : ''}">
+  const left = Math.max(0, _restTimer.left | 0);
+  const m = Math.floor(left / 60);
+  const s = left % 60;
+  const done = left <= 0;
+  return `<div class="rest-bar ${done ? 'done' : ''}" id="rest-bar">
     <div class="rest-bar-inner">
       <span class="rest-label">Recupero · ${esc(_restTimer.name)}</span>
-      <span id="rest-timer-display" class="rest-time ${done ? 'done' : ''}">${m}:${String(s).padStart(2, '0')}</span>
-      <button type="button" class="rest-stop" onclick="stopRest()">${done ? 'Chiudi' : 'Stop'}</button>
+      <span id="rest-timer-display" class="rest-time ${done ? 'done' : ''}">${done ? 'Fine!' : (m + ':' + String(s).padStart(2, '0'))}</span>
+      <button type="button" class="rest-stop" onclick="stopRest(event)">${done ? 'Chiudi' : 'Stop'}</button>
     </div>
   </div>`;
 }
 function fmtRest(sec) {
+  sec = Math.max(0, parseInt(sec, 10) || 0);
   const m = Math.floor(sec / 60), s = sec % 60;
   return m + ':' + String(s).padStart(2, '0');
 }
-
-
 
 function loggedToday() {
   if (!S.prog) return false;
@@ -349,15 +413,9 @@ function modalPick() {
 }
 function modalRest() {
   setToday('rest');
-  S.dayModal = null;
-  save();
-  render();
 }
 function modalTrain(day) {
   setToday('train', day);
-  S.dayModal = null;
-  save();
-  render();
 }
 function dayModalHtml() {
   if (!S.dayModal || !S.prog) return '';
@@ -366,11 +424,13 @@ function dayModalHtml() {
   const rem = remaining(w);
   let body = '';
   if (S.dayModal.step === 'pick') {
-    body = `<p class="big">Quale allenamento?</p>
-      <p class="mut">${esc(w.label)}</p>
-      ${rem.map(d => `<button style="border-left:8px solid ${AC[(d - 1) % 4]}" onclick="modalTrain(${d})">Giorno ${d} — ${focus(w, d)}</button>`).join('') || '<p class="mut">Settimana completata 🎉</p>'}
-      <button style="border-left:8px solid #30a46c" onclick="modalTrain('comp')">🔧 Complementari</button>
-      <button onclick="S.dayModal={step:'ask'};save();render()">← Indietro</button>`;
+    const allD = days(w);
+      const doneArr = (S.done[w.label] || []).map(Number);
+      body = `<p class="big">Quale allenamento?</p>
+      <p class="mut">${esc(w.label)} · tocca un giorno</p>
+      ${allD.map(d => `<button type="button" style="border-left:8px solid ${AC[(d - 1) % 4]}" onclick="modalTrain(${d})">Giorno ${d} — ${focus(w, d)}${doneArr.includes(Number(d)) ? ' ✓' : ''}</button>`).join('') || '<p class="mut">Nessun giorno</p>'}
+      <button type="button" style="border-left:8px solid #30a46c" onclick="modalTrain('comp')">🔧 Complementari</button>
+      <button type="button" onclick="S.dayModal={step:'ask'};save();render()">← Indietro</button>`;
   } else {
     body = `<p class="date-line">${todayLabel()}</p>
       <p class="big">Che giorno è oggi?</p>
@@ -391,9 +451,29 @@ function dayModalHtml() {
 
 const W = () => S.prog && S.prog.weeks[Math.min(S.wi, S.prog.weeks.length - 1)];
 const days = w => Object.keys(w.days).map(Number).sort((a, b) => a - b);
-const remaining = w => days(w).filter(d => !(S.done[w.label] || []).includes(d));
-function focus(w, d) { const u = []; w.days[d].forEach(e => { if (e.lift && !e.warm && !u.includes(LN[e.lift])) u.push(LN[e.lift]) }); return u.join(' · ') || 'Accessori' }
-function V(v) { S.view = v; save(); render() }
+const remaining = w => {
+  const done = (S.done[w.label] || []).map(Number);
+  return days(w).filter(d => !done.includes(Number(d)));
+};
+function dayExercises(w, d) {
+  if (!w || !w.days) return null;
+  return w.days[d] || w.days[String(d)] || w.days[Number(d)] || null;
+}
+function focus(w, d) {
+  const list = dayExercises(w, d);
+  if (!list) return 'Accessori';
+  const u = [];
+  list.forEach(e => { if (e.lift && !e.warm && !u.includes(LN[e.lift])) u.push(LN[e.lift]); });
+  return u.join(' · ') || 'Accessori';
+}
+function V(v) {
+  S.view = v;
+  // chiudi popup giorno se si cambia tab (evita schermata bloccata)
+  if (v !== 'oggi' && S.dayModal) S.dayModal = null;
+  if (S.restPicker) S.restPicker = null;
+  save();
+  render();
+}
 function fmt(text, lift) {
   const mav = /mav/i.test(text);
   return esc(text).replace(/(\d+)\s*x\s*(\d+)\s*s\b|(\d+(?:[.,]\d+)?)\s*%(\s+del\s+\S+)?|@(\d+(?:[.,]\d+)?)| (\d+(?:-\d+){2,})\b/gi, (m, a, b, p, rel, r, seq) => {
@@ -446,19 +526,58 @@ function cambiaOggi() {
   save(); render();
 }
 function setToday(type, day) {
+  // chiudi sempre i popup quando si sceglie una risposta
+  S.dayModal = null;
+  S.restPicker = null;
+
   if (type === 'train' && day === 'comp' && S.prog) {
     const w = W();
     if (w) logCal('train', w.label, weekdayMon0(), 'comp');
-    S.today = { date: dstr(), type: 'rest', finished: 1, week: w.label, day: 'comp' };
+    S.today = { date: dstr(), type: 'rest', finished: 1, week: w ? w.label : null, day: 'comp' };
     save(); render();
     return;
   }
-  S.today = { date: dstr(), type, day };
+
+  if (type === 'train') {
+    const w = W();
+    if (day === 'comp') {
+      if (w) logCal('train', w.label, weekdayMon0(), 'comp');
+      S.today = { date: dstr(), type: 'rest', finished: 1, week: w ? w.label : null, day: 'comp' };
+      S.view = 'oggi';
+      save(); render();
+      return;
+    }
+    const dayNum = Number(day);
+    if (!w || Number.isNaN(dayNum)) {
+      S.today = { date: dstr(), type: 'pick' };
+      S.view = 'oggi';
+      save(); render();
+      return;
+    }
+    // se era già in done, toglilo così puoi rifare la sessione
+    if (S.done[w.label]) {
+      S.done[w.label] = S.done[w.label].filter(x => Number(x) !== dayNum);
+      if (!S.done[w.label].length) delete S.done[w.label];
+    }
+    S.view = 'oggi';
+    S.today = {
+      date: dstr(),
+      type: 'train',
+      day: dayNum,
+      week: w.label,
+    };
+    save();
+    render();
+    return;
+  }
+
+  S.today = { date: dstr(), type, day: day != null ? day : null };
   if (type === 'rest' && S.prog) {
     const w = W();
     if (w) logCal('rest', w.label);
   }
-  save(); render();
+  save();
+  render();
 }
 function askDay() {
   if (S.today && S.today.finished && S.today.week && S.today.day) {
@@ -479,108 +598,267 @@ function askDay() {
   }
   S.today = { date: dstr(), type: 'ask' }; save(); render()
 }
-function tg(i) { const w = W(), k = w.label + '|' + S.today.day; const a = S.chk[k] = S.chk[k] || []; const x = a.indexOf(i); x < 0 ? a.push(i) : a.splice(x, 1); save(); render() }
+function tg(i) {
+  const w = W();
+  if (!w || !S.today || S.today.day == null) return;
+  const k = w.label + '|' + S.today.day;
+  const a = S.chk[k] = S.chk[k] || [];
+  const x = a.indexOf(i);
+  if (x < 0) a.push(i); else a.splice(x, 1);
+  save();
+  render();
+}
+function logFinishedWorkout(weekLabel, day) {
+  const w = S.prog && S.prog.weeks.find(x => x.label === weekLabel);
+  if (!w || day == null || day === 'comp') return;
+  const exs = dayExercises(w, day);
+  if (!exs) return;
+  const k = weekLabel + '|' + day;
+  const ck = S.chk[k] || [];
+  const entry = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    date: dstr(),
+    at: new Date().toISOString(),
+    week: weekLabel,
+    day: day,
+    title: focus(w, day),
+    exercises: exs.map((e, i) => {
+      const log = isAccessory(e) ? getAccLog(weekLabel, day, i) : null;
+      return {
+        name: e.name,
+        warm: !!e.warm,
+        main: isMainLift(e),
+        text: e.text || '',
+        done: ck.includes(i),
+        kg: log && log.kg !== '' ? log.kg : null,
+        reps: log && log.reps !== '' ? log.reps : null,
+      };
+    }),
+  };
+  S.workoutLog = S.workoutLog || [];
+  S.workoutLog.unshift(entry);
+  if (S.workoutLog.length > 100) S.workoutLog.length = 100;
+}
+function deleteWorkoutLog(id) {
+  if (!confirm('Eliminare questo allenamento dallo storico?')) return;
+  if (!confirm('Sei sicuro? Non si può annullare.')) return;
+  S.workoutLog = (S.workoutLog || []).filter(x => x.id !== id);
+  save();
+  render();
+}
 function finish() {
-  const w = W(), d = S.today.day; (S.done[w.label] = S.done[w.label] || []).push(d);
+  const w = W();
+  if (!w || !S.today) return;
+  const d = Number(S.today.day);
   const weekLabel = w.label;
-  if (w.days[d]) saveSessionLogs(weekLabel, d, w.days[d]);
+  const done = (S.done[weekLabel] = S.done[weekLabel] || []);
+  if (!done.map(Number).includes(d)) done.push(d);
+  const exs = dayExercises(w, d);
+  if (exs) {
+    saveSessionLogs(weekLabel, d, exs);
+    logFinishedWorkout(weekLabel, d);
+  }
   logCal('train', weekLabel, weekdayMon0(), d);
   if (!remaining(w).length && S.wi < S.prog.weeks.length - 1) S.wi++;
-  S.today = { date: dstr(), type: 'rest', finished: 1, week: weekLabel, day: d }; save(); render()
+  S.today = { date: dstr(), type: 'rest', finished: 1, week: weekLabel, day: d };
+  save();
+  render();
 }
 function calLink(w, d) {
-  const [h, m] = S.time.split(':').map(Number), s = new Date(); s.setHours(h, m, 0, 0); const e = new Date(s.getTime() + 5400000);
+  const [h, m] = (S.time || '17:00').split(':').map(Number);
+  const s0 = new Date(); s0.setHours(h || 17, m || 0, 0, 0);
+  const e0 = new Date(s0.getTime() + 5400000);
   const f = x => x.getFullYear() + pad(x.getMonth() + 1) + pad(x.getDate()) + 'T' + pad(x.getHours()) + pad(x.getMinutes()) + '00';
-  const det = w.days[d].filter(x => !x.warm).map(x => x.name + ': ' + x.text.replace(/(\d+(?:[.,]\d+)?)\s*%/g, (mm, p) => x.lift ? p + '% (' + Math.round(parseFloat(p.replace(',', '.')) / 100 * S.max[x.lift] / 2.5) * 2.5 + 'kg)' : mm)).join('\n');
-  return 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' + encodeURIComponent('🏋️ ' + focus(w, d) + ' – ' + w.label + ' G' + d) + '&dates=' + f(s) + '/' + f(e) + '&details=' + encodeURIComponent(det);
+  const list = dayExercises(w, d) || [];
+  const det = list.filter(x => !x.warm).map(x => {
+    let t = x.text || '';
+    t = t.replace(/(\d+(?:[.,]\d+)?)\s*%/g, (mm, p) => {
+      if (!x.lift) return mm;
+      const kg = Math.round(parseFloat(String(p).replace(',', '.')) / 100 * S.max[x.lift] / 2.5) * 2.5;
+      return p + '% (' + kg + 'kg)';
+    });
+    return x.name + ': ' + t;
+  }).join('\n');
+  return 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' + encodeURIComponent('🏋️ ' + focus(w, d) + ' – ' + w.label + ' G' + d) + '&dates=' + f(s0) + '/' + f(e0) + '&details=' + encodeURIComponent(det);
 }
 function oggi() {
   if (!S.prog) return importCard();
-  const w = W(), t = S.today;
+  const w = W();
+  if (!w) return importCard();
+
+  const t = S.today;
+  if (t && t.week) {
+    const idx = S.prog.weeks.findIndex(x => x.label === t.week);
+    if (idx >= 0) S.wi = idx;
+  }
+  const week = W() || w;
+
+  // Allenamento in corso: priorità massima
+  if (t && t.date === dstr() && t.type === 'train' && t.day != null && t.day !== 'comp' && !Number.isNaN(Number(t.day))) {
+    return renderTrainSession(week, Number(t.day));
+  }
+
+  // se c'è un modal giorno aperto, sotto mostriamo solo uno sfondo minimale
+  if (S.dayModal) {
+    return `<div class="card muted-card"><p class="mut" style="text-align:center;margin:0">Rispondi al popup per continuare</p></div>`;
+  }
+
+  const tot = days(week).length;
+  const rem = remaining(week);
+  const doneN = tot - rem.length;
+  const pct = tot > 0 ? (doneN / tot) * 100 : 0;
+  const progress = `<p class="mut">${esc(week.label)} · completati ${doneN} su ${tot}</p>
+    <div class="bar"><i style="width:${pct}%"></i></div>`;
+
+  // Home: non risposto / ask
   if (!t || t.date !== dstr() || t.type === 'ask') {
-    const tot = days(w).length;
-    const rem = remaining(w);
-    const done = tot - rem.length;
-    const pct = tot > 0 ? (done / tot) * 100 : 0;
     const wd = weekdayMon0();
-    const todayLog = (S.weekLog[w.label] || {})[wd];
+    const todayLog = (S.weekLog[week.label] || {})[wd];
     const todayKind = logType(todayLog);
 
     if (todayKind) {
       const isTrain = todayKind === 'train';
-      return `<div class="card">
-      <p class="mut">${w.label} · completati ${done} su ${tot}</p>
-      <div class="bar" style="background:var(--pill); margin-top:8px; margin-bottom:20px;">
-        <i style="width:${pct}%; background:var(--ac, #3e8bff)"></i>
-      </div>
-      <p class="date-line">${todayLabel()}</p>
-      <p class="big">${isTrain ? 'Allenamento fatto ✓' : 'Giorno di riposo 😴'}</p>
-      <p class="mut">${isTrain ? (logDayNum(todayLog) === 'comp' ? 'Oggi: complementari (extra)' : ('Oggi: allenamento' + (logDayNum(todayLog) != null ? ' · Giorno ' + logDayNum(todayLog) : ''))) : 'Oggi è registrato come riposo.'}</p>
-      <button onclick="cambiaOggi()">Cambia risposta</button>
-    </div>${coachImg()}`
+      const dayN = logDayNum(todayLog);
+      let detail = 'Oggi è registrato come riposo.';
+      if (isTrain) {
+        if (dayN === 'comp') detail = 'Oggi: complementari (extra)';
+        else if (dayN != null) detail = 'Oggi: allenamento · Giorno ' + dayN;
+        else detail = 'Oggi: allenamento';
+      }
+      return `<div class="card home-card">
+        ${progress}
+        <p class="date-line">${todayLabel()}</p>
+        <p class="big">${isTrain ? 'Allenamento fatto ✓' : 'Giorno di riposo 😴'}</p>
+        <p class="mut">${detail}</p>
+        <button type="button" onclick="cambiaOggi()">Cambia risposta</button>
+      </div>${coachImg()}`;
     }
 
-    return `<div class="card">
-      <p class="mut">${w.label} · completati ${done} su ${tot}</p>
-      <div class="bar" style="background:var(--pill); margin-top:8px; margin-bottom:20px;">
-        <i style="width:${pct}%; background:var(--ac, #3e8bff)"></i>
-      </div>
+    return `<div class="card home-card">
+      ${progress}
       <p class="date-line">${todayLabel()}</p>
       <p class="big">Che giorno è oggi?</p>
       <div class="row">
-        <button onclick="setToday('rest')">😴 Riposo</button>
-        <button onclick="S.today={date:dstr(),type:'pick'};save();render()">💪 Allenamento</button>
+        <button type="button" onclick="setToday('rest')">😴 Riposo</button>
+        <button type="button" class="pri" onclick="S.today={date:dstr(),type:'pick'};save();render()">💪 Allenamento</button>
       </div>
-    </div>${coachImg()}`}
-  if (t.type === 'pick') {
-    const rem = remaining(w);
-    return `<div class="card"><p class="big">Quale allenamento?</p><p class="mut">${w.label} · quelli che ti restano</p>${rem.map(d => `<button style="border-left:8px solid ${AC[(d - 1) % 4]}" onclick="setToday('train',${d})">Giorno ${d} — ${focus(w, d)}</button>`).join('') || '<p>Settimana completata 🎉</p>'}<button style="border-left:8px solid #30a46c" onclick="setToday('train','comp')">🔧 Complementari <span class="mut" style="font-weight:600">(extra, fuori scheda)</span></button><button onclick="askDay()">← Indietro</button><button onclick="S.today=null;save();render()">🏠 Torna alla home</button></div>${coachImg()}`
+    </div>${coachImg()}`;
   }
-  if (t.type === 'rest') return `<div class="card"><p class="big">${t.finished ? 'Allenamento fatto ✓' : 'Giorno di riposo 😴'}</p><p class="mut">Prossimo: ${w.label}${remaining(w).length ? ' · giorno ' + remaining(w)[0] : ''}</p>
-  <div class="row">
-    <button onclick="askDay()">Cambia risposta</button>
-    <button class="pri" onclick="S.today=null;save();render()">🏠 Torna alla home</button>
-  </div></div>${coachImg()}`;
-  const d = t.day, ex = w.days[d], k = w.label + '|' + d, ck = S.chk[k] || [], left = ex.length - ck.length, ac = AC[(d - 1) % 4];
-  return `${restBarHtml()}<div style="--ac:${ac}"><div class="hero"><div class="mut">${w.label} · GIORNO ${d}</div><p class="big">${focus(w, d)}</p><div class="mut">${ck.length}/${ex.length} esercizi fatti</div><div class="bar"><i style="width:${ck.length / ex.length * 100}%"></i></div></div>
-  ${ex.map((e, i) => {
+
+  if (t.type === 'pick') {
+    const allDays = days(week);
+    const doneArr = (S.done[week.label] || []).map(Number);
+    const btns = allDays.map(d => {
+      const done = doneArr.includes(Number(d));
+      return `<button type="button" style="border-left:8px solid ${AC[(d - 1) % 4]}" onclick="setToday('train',${d})">Giorno ${d} — ${focus(week, d)}${done ? ' ✓' : ''}</button>`;
+    }).join('') || '<p class="mut">Nessun giorno in questa settimana</p>';
+    return `<div class="card home-card">
+      <p class="date-line">${todayLabel()}</p>
+      <p class="big">Quale allenamento?</p>
+      <p class="mut">${esc(week.label)} · tocca un giorno per aprire gli esercizi</p>
+      ${btns}
+      <button type="button" style="border-left:8px solid #30a46c" onclick="setToday('train','comp')">🔧 Complementari</button>
+      <button type="button" onclick="askDay()">← Indietro</button>
+      <button type="button" onclick="S.today=null;save();render()">🏠 Torna alla home</button>
+    </div>`;
+  }
+
+  if (t.type === 'rest') {
+    return `<div class="card home-card">
+      <p class="date-line">${todayLabel()}</p>
+      <p class="big">${t.finished ? 'Allenamento fatto ✓' : 'Giorno di riposo 😴'}</p>
+      <p class="mut">Prossimo: ${esc(week.label)}${remaining(week).length ? ' · giorno ' + remaining(week)[0] : ''}</p>
+      <div class="row">
+        <button type="button" onclick="askDay()">Cambia risposta</button>
+        <button type="button" class="pri" onclick="S.today=null;save();render()">🏠 Home</button>
+      </div>
+    </div>${coachImg()}`;
+  }
+
+  // fallback
+  return `<div class="card home-card">
+    <p class="date-line">${todayLabel()}</p>
+    <p class="big">Scegli l'allenamento</p>
+    <button type="button" class="pri" onclick="askDay()">Scegli il giorno</button>
+  </div>`;
+}
+
+/** Schermata esercizi + timer durante l'allenamento */
+function renderTrainSession(week, day) {
+  if (!week) {
+    return `<div class="card home-card"><p class="big">Scheda non trovata</p><button type="button" onclick="askDay()">Indietro</button></div>`;
+  }
+  const d = day;
+  const ex = dayExercises(week, d);
+  if (!ex || !Array.isArray(ex) || !ex.length) {
+    return `<div class="card home-card">
+      <p class="date-line">${todayLabel()}</p>
+      <p class="big">Nessun esercizio</p>
+      <p class="mut">${esc(week.label)} · giorno ${d}</p>
+      <button type="button" class="pri" onclick="askDay()">Scegli un altro giorno</button>
+    </div>`;
+  }
+  const k = week.label + '|' + d;
+  const ck = S.chk[k] || [];
+  const left = ex.length - ck.length;
+  const ac = AC[(Number(d) - 1) % 4];
+  const pctDone = ex.length ? (ck.length / ex.length * 100) : 0;
+
+  const list = ex.map((e, i) => {
     const acc = isAccessory(e);
-    const log = acc ? getAccLog(w.label, d, i) : null;
+    const log = acc ? getAccLog(week.label, d, i) : null;
     const rest = !e.warm ? getRestSec(e.name) : 0;
     const hist = acc ? historyHtml(e.name) : '';
+    const nmJs = JSON.stringify(e.name); // stringa JS sicura
     const timerBtn = !e.warm
-      ? `<div class="rest-row" onclick="event.stopPropagation()">
-          <button type="button" class="rest-start" onclick="startRest(${JSON.stringify(e.name)})">⏱ Avvia ${fmtRest(rest)}</button>
-          <button type="button" class="rest-set" onclick="openRestPicker(${JSON.stringify(e.name)})">Imposta tempo</button>
+      ? `<div class="rest-row">
+          <button type="button" class="rest-start" data-ex="${esc(e.name)}" onclick='startRest(${nmJs}, event)'>⏱ Avvia ${fmtRest(rest)}</button>
+          <button type="button" class="rest-set" data-ex="${esc(e.name)}" onclick='openRestPicker(${nmJs}, event)'>Tempo</button>
         </div>`
       : '';
     const logRow = acc
-      ? `<div class="ex-log" onclick="event.stopPropagation()">
+      ? `<div class="ex-log">
           <input type="number" inputmode="decimal" step="0.5" placeholder="kg" value="${log.kg}"
-            onchange="setAccLog(${JSON.stringify(w.label)},${d},${i},'kg',this.value)">
+            onclick="event.stopPropagation()" onchange="setAccLog(${JSON.stringify(week.label)},${d},${i},'kg',this.value)">
           <input type="number" inputmode="numeric" step="1" placeholder="rip" value="${log.reps}"
-            onchange="setAccLog(${JSON.stringify(w.label)},${d},${i},'reps',this.value)">
+            onclick="event.stopPropagation()" onchange="setAccLog(${JSON.stringify(week.label)},${d},${i},'reps',this.value)">
         </div>${hist}`
       : '';
-    return `<div class="ex ${e.warm ? 'w' : ''} ${e.lift ? 'main' : ''} ${acc ? 'acc' : ''} ${ck.includes(i) ? 'ok' : ''}" onclick="tg(${i})">
-      <div class="n">${ck.includes(i) ? '✓' : i + 1}</div>
+    return `<div class="ex ${e.warm ? 'w' : ''} ${e.lift ? 'main' : ''} ${acc ? 'acc' : ''} ${ck.includes(i) ? 'ok' : ''}">
+      <div class="n" onclick="tg(${i})" role="button">${ck.includes(i) ? '✓' : (i + 1)}</div>
       <div class="ex-body">
-        <div class="nm">${esc(e.name)}</div>
-        <div class="dt">${fmt(e.text, e.lift)}</div>
+        <div class="ex-head" onclick="tg(${i})" role="button">
+          <div class="nm">${esc(e.name)}</div>
+          <div class="dt">${fmt(e.text, e.lift)}</div>
+        </div>
         ${logRow}
         ${timerBtn}
       </div>
     </div>`;
-  }).join('')}
-  <div class="card card-time"><label>Orario allenamento</label><input type="time" value="${S.time}" onchange="if(this.value){S.time=this.value;save();render()}else{this.value=S.time}"><a class="btn" target="_blank" rel="noopener" href="${calLink(w, d)}">📅 Aggiungi al calendario</a></div>
-  <button class="pri" style="background:${ac};color:#fff" ${left ? 'disabled' : ''} onclick="finish()">${left ? 'Mancano ' + left + ' esercizi' : 'Allenamento finito ✓'}</button>
-  ${left ? `<button onclick="finish()">Segna finito comunque</button>` : ''}
-  <button onclick="askDay()">Cambia giorno</button>
-  <button onclick="S.today=null;save();render()">🏠 Torna alla home</button>
-  ${coachImg()}</div>`;
+  }).join('');
+
+  return `${restBarHtml()}
+  <div class="train-wrap" style="--ac:${ac}">
+    <div class="hero">
+      <div class="mut">${esc(week.label)} · GIORNO ${d}</div>
+      <p class="big">${focus(week, d)}</p>
+      <div class="mut">${ck.length}/${ex.length} esercizi fatti</div>
+      <div class="bar"><i style="width:${pctDone}%"></i></div>
+    </div>
+    ${list}
+    <div class="card card-time">
+      <label>Orario allenamento</label>
+      <input type="time" value="${S.time}" onchange="if(this.value){S.time=this.value;save();render()}else{this.value=S.time}">
+      <a class="btn" target="_blank" rel="noopener" href="${calLink(week, d)}">📅 Aggiungi al calendario</a>
+    </div>
+    <button type="button" class="pri" style="background:${ac};color:#fff" ${left ? 'disabled' : ''} onclick="finish()">${left ? 'Mancano ' + left + ' esercizi' : 'Allenamento finito ✓'}</button>
+    ${left ? `<button type="button" onclick="finish()">Segna finito comunque</button>` : ''}
+    <button type="button" onclick="askDay()">Cambia giorno</button>
+    <button type="button" onclick="S.today=null;save();render()">🏠 Torna alla home</button>
+  </div>`;
 }
 
-// Funzione helper per l'aggiornamento dei massimali con controllo
+// Funzione helper per l'aggiornamento
 function updateMax(lift, inputElement) {
   let val = parseFloat(inputElement.value);
   if (isNaN(val) || val <= 0) {
@@ -590,6 +868,33 @@ function updateMax(lift, inputElement) {
     S.max[lift] = val;
     save();
   }
+}
+
+
+function storico() {
+  const list = S.workoutLog || [];
+  if (!list.length) {
+    return `<div class="card"><p class="big">Storico allenamenti</p>
+      <p class="mut">Quando termini un allenamento comparirà qui, con esercizi e carichi dei complementari.</p>
+    </div>`;
+  }
+  return `<h1>Storico</h1>` + list.map(w => {
+    const doneN = (w.exercises || []).filter(e => e.done).length;
+    const tot = (w.exercises || []).length;
+    const lines = (w.exercises || []).filter(e => !e.warm).map(e => {
+      let extra = '';
+      if (e.kg != null || e.reps != null) extra = ` · <b>${e.kg != null ? e.kg + ' kg' : ''}${e.kg != null && e.reps != null ? ' × ' : ''}${e.reps != null ? e.reps : ''}</b>`;
+      return `<div class="hist-ex ${e.done ? 'ok' : ''}"><span>${e.done ? '✓' : '·'} ${esc(e.name)}</span>${extra}</div>`;
+    }).join('');
+    return `<div class="card">
+      <div class="wk-top"><b>${esc(w.date)}</b>
+        <button class="res-btn" onclick="deleteWorkoutLog('${w.id}')">❌</button>
+      </div>
+      <p class="big" style="font-size:18px;margin:6px 0">${esc(w.week)} · G${w.day}</p>
+      <p class="mut">${esc(w.title)} · ${doneN}/${tot} esercizi</p>
+      <div class="hist-ex-list">${lines}</div>
+    </div>`;
+  }).join('');
 }
 
 function piano() {
@@ -647,17 +952,58 @@ function resetWk(label, e) {
     }
   }
 }
+
+/** Collegamento sicuro bottoni timer (evita problemi onclick HTML su iOS) */
+function bindRestButtons() {
+  document.querySelectorAll('.rest-start').forEach(btn => {
+    btn.onclick = function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const name = btn.getAttribute('data-ex') || '';
+      startRest(name, ev);
+    };
+  });
+  document.querySelectorAll('.rest-set').forEach(btn => {
+    btn.onclick = function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const name = btn.getAttribute('data-ex') || '';
+      openRestPicker(name, ev);
+    };
+  });
+}
+
 function render() {
-  const w = S.prog && W(), ac = S.view === 'oggi' && S.today && S.today.type === 'train' ? AC[(S.today.day - 1) % 4] : '#3e8bff';
-  document.documentElement.style.setProperty('--ac', ac);
-  $('t0').className = S.view === 'oggi' ? 'on' : ''; $('t1').className = S.view === 'piano' ? 'on' : '';
-  $('app').innerHTML = (S.view === 'oggi' ? oggi() : piano()) + dayModalHtml() + restPickerHtml();
-  document.body.classList.toggle('modal-open', !!(S.dayModal || S.restPicker));
-  if (S.dayEdit) {
-    requestAnimationFrame(() => {
-      const el = document.getElementById('edit-day-panel');
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
+  try {
+    const w = S.prog && W(), ac = S.view === 'oggi' && S.today && S.today.type === 'train' && S.today.day != null && S.today.day !== 'comp' ? AC[(S.today.day - 1) % 4] : '#3e8bff';
+    document.documentElement.style.setProperty('--ac', ac);
+    const t0 = $('t0'), t1 = $('t1'), t2 = $('t2');
+    if (t0) t0.className = S.view === 'oggi' ? 'on' : '';
+    if (t1) t1.className = S.view === 'piano' ? 'on' : '';
+    if (t2) t2.className = S.view === 'storico' ? 'on' : '';
+    let body = '';
+    if (S.view === 'oggi') body = oggi();
+    else if (S.view === 'storico') body = storico();
+    else body = piano();
+    $('app').innerHTML = body + dayModalHtml() + restPickerHtml();
+    document.body.classList.toggle('modal-open', !!(S.dayModal || S.restPicker));
+    bindRestButtons();
+    if (S.dayEdit) {
+      requestAnimationFrame(() => {
+        const el = document.getElementById('edit-day-panel');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
+  } catch (err) {
+    console.error('render error', err);
+    try {
+      $('app').innerHTML = `<div class="card"><p class="big">Errore di visualizzazione</p>
+        <p class="mut">${esc(String(err && err.message || err))}</p>
+        <button type="button" class="pri" onclick="S.dayModal=null;S.restPicker=null;S.today={date:dstr(),type:'ask'};save();render()">Torna alla home</button>
+      </div>`;
+    } catch (e2) {
+      console.error(e2);
+    }
   }
 }
 
@@ -677,6 +1023,17 @@ function render() {
 })();
 
 render();
+// Espone funzioni usate dagli onclick inline (iOS / strict)
+window.startRest = startRest;
+window.stopRest = stopRest;
+window.openRestPicker = openRestPicker;
+window.closeRestPicker = closeRestPicker;
+window.adjustRestPicker = adjustRestPicker;
+window.setRestPickerPreset = setRestPickerPreset;
+window.confirmRestPicker = confirmRestPicker;
+window.fmtRest = fmtRest;
+window.tg = tg;
+window.setAccLog = setAccLog;
 /* ========== Push Notifications ========== */
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
