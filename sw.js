@@ -9,7 +9,7 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('push', (event) => {
   let data = {
-    title: '🏋️ Scheda Powerlifting',
+    title: 'Scheda Powerlifting',
     body: 'È ora di allenarsi!',
     icon: '/coach.jpg',
     badge: '/coach.jpg',
