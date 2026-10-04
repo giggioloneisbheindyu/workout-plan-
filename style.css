@@ -1108,3 +1108,234 @@ nav button {
 .rest-picker-card button {
   pointer-events: auto !important;
 }
+
+
+/* Card per serie */
+.sets-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.set-card {
+  background: var(--pill);
+  border: 1px solid var(--bd);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.set-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mut);
+  margin-bottom: 8px;
+  letter-spacing: 0.02em;
+}
+.set-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.set-inputs input {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-weight: 800;
+  font-size: 16px;
+  padding: 10px 8px;
+  margin: 0;
+}
+.set-x {
+  font-weight: 800;
+  color: var(--mut);
+  flex: none;
+}
+
+
+.set-card {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  border: 1px solid var(--bd);
+}
+.set-card:active {
+  transform: scale(0.98);
+}
+.set-card-fired {
+  border-color: var(--ac, #3e8bff) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ac, #3e8bff) 35%, transparent);
+}
+.set-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.set-rest-hint {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ac, #3e8bff);
+  white-space: nowrap;
+}
+.set-card input {
+  cursor: text;
+}
+
+
+.set-card.set-done {
+  opacity: 0.55;
+  border-color: #30a46c;
+  background: color-mix(in srgb, #30a46c 12%, var(--pill));
+}
+.set-card.set-done .set-title {
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+.set-card.set-done .set-rest-hint {
+  color: #30a46c;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.set-card.set-done input {
+  text-decoration: line-through;
+  opacity: 0.85;
+}
+
+
+/* Storico: dettaglio serie */
+.hist-workout .hist-ex-list {
+  margin-top: 12px;
+  gap: 12px;
+}
+.hist-ex-block {
+  background: var(--pill);
+  border-radius: 12px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--bd);
+}
+.hist-ex-block.ok {
+  border-left-color: #30a46c;
+}
+.hist-ex-name {
+  font-weight: 800;
+  font-size: 15px;
+  margin-bottom: 8px;
+  text-transform: capitalize;
+}
+.hist-sets {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hist-set {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--bd);
+}
+.hist-set:last-child {
+  border-bottom: 0;
+}
+.hist-set-n {
+  color: var(--mut);
+  font-weight: 700;
+  flex: none;
+}
+.hist-set-val {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.hist-set.done .hist-set-val {
+  color: #30a46c;
+}
+.hist-nosets {
+  margin: 0;
+  font-size: 12px;
+}
+
+
+.set-locked {
+  cursor: pointer;
+}
+.set-readonly {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px 4px;
+}
+.set-ro-kg,
+.set-ro-reps {
+  font-weight: 800;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+.set-lock-hint {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--mut);
+  text-align: center;
+}
+.sets-locked .set-card {
+  background: var(--card);
+}
+
+.set-ro-inline {
+  font-weight: 800;
+  font-size: 16px;
+  min-width: 64px;
+  text-align: center;
+  color: var(--mut);
+}
+.set-rpe input {
+  flex: 1;
+}
+
+.set-prev-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--mut);
+  line-height: 1.35;
+}
+.set-prev-hint b {
+  color: var(--tx);
+  font-weight: 800;
+}
+
+.set-done-ro {
+  opacity: 0.9;
+}
+.set-card.set-done input {
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+input.kg-suggested {
+  border-color: color-mix(in srgb, var(--ac, #3e8bff) 50%, var(--bd));
+}
+
+.hist-tools .btn {
+  display: block;
+  text-align: center;
+}
+
+.hist-prog-section {
+  margin-bottom: 20px;
+}
+.hist-prog-title {
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--tx);
+  margin: 16px 0 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--bd);
+}
+
+.hist-rest {
+  border-left: 4px solid #3e8bff;
+}

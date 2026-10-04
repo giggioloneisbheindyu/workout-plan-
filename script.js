@@ -1,12 +1,125 @@
 const KEY = 'powerapp_v1', AC = ['#e5484d', '#3e8bff', '#e08a00', '#30a46c'], LN = { s: 'Squat', b: 'Panca', d: 'Stacco' };
 let S = {};
 try { S = JSON.parse(localStorage.getItem(KEY)) || {} } catch (e) { }
-S.max = S.max || { s: 210, b: 110, d: 265 }; S.done = S.done || {}; S.chk = S.chk || {}; S.wi = S.wi || 0; S.view = S.view || 'oggi'; S.time = S.time || '17:00'; S.pushOn = S.pushOn || false; S.weekLog = S.weekLog || {}; S.promptedDate = S.promptedDate || null; S.dayModal = S.dayModal || null; S.accLog = S.accLog || {}; S.liftHistory = S.liftHistory || {}; S.restByEx = S.restByEx || {}; S.restDefault = S.restDefault || 120; S.restPicker = S.restPicker || null; S.workoutLog = S.workoutLog || [];
+S.max = S.max || { s: 210, b: 110, d: 265 }; S.done = S.done || {}; S.chk = S.chk || {}; S.wi = S.wi || 0; S.view = S.view || 'oggi'; S.time = S.time || '17:00'; S.pushOn = S.pushOn || false; S.weekLog = S.weekLog || {}; S.promptedDate = S.promptedDate || null; S.dayModal = S.dayModal || null; S.accLog = S.accLog || {}; S.liftHistory = S.liftHistory || {}; S.restByEx = S.restByEx || {}; S.restDefault = S.restDefault || 120; S.restPicker = S.restPicker || null; S.workoutLog = S.workoutLog || []; S.progCatalog = S.progCatalog || [];
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)) } catch (e) { } };
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const pad = n => String(n).padStart(2, '0');
 const dstr = (d = new Date()) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+
+/** Meta scheda + catalogo (storico per scheda) */
+function ensureProgMeta(prog, fileName) {
+  if (!prog) return prog;
+  if (fileName) {
+    const raw = String(fileName).trim();
+    let fn = raw;
+    if (!/\.docx$/i.test(fn)) fn = fn + '.docx';
+    prog.fileName = fn;
+    prog.name = fn.replace(/\.docx$/i, '');
+  }
+  if (!prog.name) {
+    const first = prog.weeks && prog.weeks[0] && prog.weeks[0].label;
+    prog.name = first ? String(first).replace(/\s+/g, ' ').trim() : 'Scheda';
+  }
+  if (!prog.fileName) {
+    prog.fileName = /\.docx$/i.test(prog.name) ? prog.name : (prog.name + '.docx');
+  }
+  // Riusa l'id se questa scheda (stesso file .docx) era già in catalogo/storico
+  const fnKey = String(prog.fileName).toLowerCase();
+  const nameKey = String(prog.name).toLowerCase();
+  const catalog = S.progCatalog || [];
+  let known = catalog.find(p => p.fileName && String(p.fileName).toLowerCase() === fnKey);
+  if (!known) known = catalog.find(p => p.name && String(p.name).toLowerCase() === nameKey);
+  // oppure già usata nello storico
+  if (!known) {
+    const fromLog = (S.workoutLog || []).find(w =>
+      (w.progFileName && String(w.progFileName).toLowerCase() === fnKey) ||
+      (w.progName && String(w.progName).toLowerCase() === nameKey)
+    );
+    if (fromLog && fromLog.progId) {
+      known = { id: fromLog.progId, name: fromLog.progName, fileName: fromLog.progFileName || prog.fileName };
+    }
+  }
+  if (known && known.id) {
+    prog.id = known.id;
+    if (known.name) prog.name = known.name;
+    if (known.fileName) prog.fileName = known.fileName;
+  } else if (!prog.id) {
+    prog.id = 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+  return prog;
+}
+function displayProgFileName(progLike) {
+  if (!progLike) return 'Scheda.docx';
+  if (progLike.fileName) return progLike.fileName;
+  if (progLike.name) {
+    return /\.docx$/i.test(progLike.name) ? progLike.name : (progLike.name + '.docx');
+  }
+  return 'Scheda.docx';
+}
+function snapshotProg(prog) {
+  if (!prog) return null;
+  ensureProgMeta(prog);
+  return {
+    id: prog.id,
+    name: prog.name,
+    fileName: prog.fileName || displayProgFileName(prog),
+    weeks: (prog.weeks || []).map(w => ({
+      label: w.label,
+      days: Object.fromEntries(
+        Object.keys(w.days || {}).map(d => [
+          d,
+          (w.days[d] || []).map(e => ({ name: e.name, warm: !!e.warm, text: e.text || '' }))
+        ])
+      )
+    })),
+    archivedAt: new Date().toISOString()
+  };
+}
+function archiveProg(prog) {
+  if (!prog) return;
+  ensureProgMeta(prog);
+  S.progCatalog = S.progCatalog || [];
+  const snap = snapshotProg(prog);
+  const i = S.progCatalog.findIndex(p => p.id === snap.id);
+  if (i >= 0) S.progCatalog[i] = snap;
+  else S.progCatalog.unshift(snap);
+  if (S.progCatalog.length > 30) S.progCatalog.length = 30;
+}
+function allKnownProgs() {
+  const out = [];
+  const seen = new Set();
+  if (S.prog) {
+    ensureProgMeta(S.prog);
+    const snap = snapshotProg(S.prog);
+    out.push(snap);
+    seen.add(snap.id);
+  }
+  (S.progCatalog || []).forEach(p => {
+    if (p && p.id && !seen.has(p.id)) {
+      out.push(p);
+      seen.add(p.id);
+    }
+  });
+  return out;
+}
+function findProgForWorkout(w) {
+  const progs = allKnownProgs();
+  for (const p of progs) {
+    const weekObj = (p.weeks || []).find(x => x.label === w.week);
+    if (!weekObj) continue;
+    const dayN = w.day;
+    const dayEx = (weekObj.days && (weekObj.days[dayN] || weekObj.days[String(dayN)])) || [];
+    if (!dayEx.length && Number(dayN)) continue;
+    const names = new Set(dayEx.map(e => liftKey(e.name || e)));
+    const exercises = (w.exercises || []).filter(e => e.name && !e.warm);
+    if (!exercises.length) return p;
+    if (exercises.every(e => names.has(liftKey(e.name)))) return p;
+  }
+  return null;
+}
+
 
 const WD = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
 const WD_FULL = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
@@ -32,14 +145,155 @@ const logCal = (type, weekLabel, wd = weekdayMon0(), day = null) => {
   if (type === 'train') S.weekLog[weekLabel][wd] = { type: 'train', day };
   else S.weekLog[weekLabel][wd] = { type: 'rest' };
 };
+/** Tipo entry storico: train | rest */
+function entryType(e) {
+  if (!e) return null;
+  if (e.type === 'rest' || e.rest) return 'rest';
+  if (e.type === 'train' || e.exercises) return 'train';
+  if (e.day != null) return 'train';
+  return null;
+}
+/** Rimuove dallo storico per settimana + giorno scheda */
+function removeWorkoutLogByWeekDay(weekLabel, day, progId) {
+  if (day == null || day === 'comp') {
+    // solo weekday-based removal handled elsewhere
+  } else {
+    const dayN = Number(day);
+    S.workoutLog = (S.workoutLog || []).filter(w => {
+      if (entryType(w) === 'rest') return true;
+      if (String(w.week) !== String(weekLabel)) return true;
+      if (Number(w.day) !== dayN && String(w.day) !== String(day)) return true;
+      if (progId && w.progId && w.progId !== progId) return true;
+      return false;
+    });
+    const k = weekLabel + '|' + day;
+    if (S.chk) delete S.chk[k];
+    if (S.accLog) delete S.accLog[k];
+  }
+}
+/** Rimuove dallo storico per settimana + weekday calendario (Lun–Dom) */
+function removeStoricoByWeekWeekday(weekLabel, wd, progId) {
+  S.workoutLog = (S.workoutLog || []).filter(w => {
+    if (String(w.week) !== String(weekLabel)) return true;
+    const ewd = w.weekday != null ? Number(w.weekday)
+      : (w.date ? weekdayMon0(new Date(w.date + 'T12:00:00')) : null);
+    if (ewd !== Number(wd)) return true;
+    if (progId && w.progId && w.progId !== progId) return true;
+    return false;
+  });
+}
+/**
+ * FONTE DI VERITÀ = S.workoutLog (storico).
+ * Ricostruisce S.done e S.weekLog del Piano per la scheda attuale.
+ */
+function rebuildPianoFromStorico() {
+  if (!S.prog || !S.prog.weeks) return;
+  ensureProgMeta(S.prog);
+  const progId = S.prog.id;
+  const fnKey = String(displayProgFileName(S.prog)).toLowerCase();
+  const labels = new Set(S.prog.weeks.map(w => w.label));
+
+  // Pulisci solo lo stato piano delle settimane di QUESTA scheda
+  labels.forEach(label => {
+    if (S.done) delete S.done[label];
+    if (S.weekLog) delete S.weekLog[label];
+  });
+  S.done = S.done || {};
+  S.weekLog = S.weekLog || {};
+
+  (S.workoutLog || []).forEach(entry => {
+    if (!entry || !entry.week) return;
+    // Appartiene a questa scheda?
+    const sameId = entry.progId && entry.progId === progId;
+    const sameFile = entry.progFileName && String(entry.progFileName).toLowerCase() === fnKey;
+    const sameName = entry.progName && S.prog.name &&
+      String(entry.progName).toLowerCase() === String(S.prog.name).toLowerCase();
+    // migrazione: log senza progId ma settimana presente nella scheda attuale
+    const legacy = !entry.progId && !entry.progFileName && labels.has(String(entry.week));
+    if (!sameId && !sameFile && !sameName && !legacy) return;
+    if (!labels.has(String(entry.week))) return; // settimana non in questa scheda
+
+    const t = entryType(entry);
+    let wd = entry.weekday != null ? Number(entry.weekday) : null;
+    if (wd == null && entry.date) {
+      try { wd = weekdayMon0(new Date(entry.date + 'T12:00:00')); } catch (e) { wd = null; }
+    }
+
+    if (t === 'rest') {
+      if (wd != null && wd >= 0 && wd <= 6) logCal('rest', entry.week, wd);
+      return;
+    }
+
+    // train: day 1–4, complementari, ecc. sul weekday corretto
+    const day = entry.day;
+    if (day != null && day !== 'comp') {
+      const d = Number(day);
+      if (!Number.isNaN(d)) {
+        const done = (S.done[entry.week] = S.done[entry.week] || []);
+        if (!done.map(Number).includes(d)) done.push(d);
+      }
+    }
+    if (wd != null && wd >= 0 && wd <= 6) {
+      logCal('train', entry.week, wd, day != null ? day : null);
+    }
+  });
+}
+function addRestToStorico(week, wd) {
+  if (S.prog) { ensureProgMeta(S.prog); archiveProg(S.prog); }
+  const progId = S.prog && S.prog.id;
+  removeStoricoByWeekWeekday(week, wd, progId);
+  S.workoutLog = S.workoutLog || [];
+  S.workoutLog.unshift({
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    type: 'rest',
+    date: dstr(),
+    at: new Date().toISOString(),
+    week: week,
+    weekday: wd,
+    day: null,
+    title: 'Riposo',
+    progId: progId || null,
+    progName: S.prog ? S.prog.name : 'Scheda',
+    progFileName: S.prog ? displayProgFileName(S.prog) : null,
+    exercises: []
+  });
+  if (S.workoutLog.length > 200) S.workoutLog.length = 200;
+}
+/** Segna allenamento (anche da Piano senza sessione completa) */
+function addTrainMarkToStorico(week, wd, dayNum) {
+  if (S.prog) { ensureProgMeta(S.prog); archiveProg(S.prog); }
+  const progId = S.prog && S.prog.id;
+  removeStoricoByWeekWeekday(week, wd, progId);
+  if (dayNum != null && dayNum !== 'comp') removeWorkoutLogByWeekDay(week, dayNum, progId);
+  const wObj = S.prog && S.prog.weeks.find(x => x.label === week);
+  const title = (dayNum === 'comp') ? 'Complementari' : (wObj && dayNum != null ? focus(wObj, dayNum) : 'Allenamento');
+  S.workoutLog = S.workoutLog || [];
+  S.workoutLog.unshift({
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    type: 'train',
+    date: dstr(),
+    at: new Date().toISOString(),
+    week: week,
+    weekday: wd,
+    day: dayNum,
+    title: title,
+    progId: progId || null,
+    progName: S.prog ? S.prog.name : 'Scheda',
+    progFileName: S.prog ? displayProgFileName(S.prog) : null,
+    exercises: [],
+    fromPiano: true
+  });
+  if (S.workoutLog.length > 200) S.workoutLog.length = 200;
+}
 const clearCal = (weekLabel, wd = weekdayMon0()) => {
+  // elimina dallo storico tutto ciò che era su questo weekday, poi il piano si ricostruisce
+  const progId = S.prog && S.prog.id;
+  removeStoricoByWeekWeekday(weekLabel, wd, progId);
   if (S.weekLog && S.weekLog[weekLabel]) {
     const prev = S.weekLog[weekLabel][wd];
     const prevDay = logDayNum(prev);
-    // se era un allenamento con giorno scheda, togli da done
-    if (logType(prev) === 'train' && prevDay != null && prevDay !== 'comp' && S.done[weekLabel]) {
-      S.done[weekLabel] = S.done[weekLabel].filter(x => x !== prevDay);
-      if (!S.done[weekLabel].length) delete S.done[weekLabel];
+    if (logType(prev) === 'train' && prevDay != null && prevDay !== 'comp') {
+      removeWorkoutLogByWeekDay(weekLabel, prevDay, progId);
     }
     delete S.weekLog[weekLabel][wd];
     if (!Object.keys(S.weekLog[weekLabel]).length) delete S.weekLog[weekLabel];
@@ -71,15 +325,16 @@ function setWday(type) {
     if (!confirm('Vuoi cancellare la registrazione di questo giorno?')) return;
     if (!confirm('Confermi? L\'operazione non si può annullare.')) return;
     clearCal(week, wd);
+    rebuildPianoFromStorico();
     if (wd === weekdayMon0() && week === (W() && W().label)) S.today = null;
     S.dayEdit = null;
     save(); render();
     return;
   }
   if (type === 'rest') {
-    // se prima c'era un train, clearCal gestisce done
     clearCal(week, wd);
-    logCal('rest', week, wd);
+    addRestToStorico(week, wd);
+    rebuildPianoFromStorico();
     if (wd === weekdayMon0() && week === (W() && W().label)) {
       S.today = { date: dstr(), type: 'rest' };
     }
@@ -98,16 +353,12 @@ function setWdayTrain(dayNum) {
   if (!S.dayEdit) return;
   const { week, wd } = S.dayEdit;
   clearCal(week, wd);
-  logCal('train', week, wd, dayNum);
-  // complementari: non entra in S.done (non è un giorno della scheda)
-  if (dayNum !== 'comp') {
-    const done = (S.done[week] = S.done[week] || []);
-    if (!done.includes(dayNum)) done.push(dayNum);
-    const wObj = S.prog.weeks.find(x => x.label === week);
-    if (wObj && !remaining(wObj).length) {
-      const idx = S.prog.weeks.findIndex(x => x.label === week);
-      if (idx >= 0 && idx < S.prog.weeks.length - 1 && S.wi === idx) S.wi = idx + 1;
-    }
+  addTrainMarkToStorico(week, wd, dayNum);
+  rebuildPianoFromStorico();
+  const wObj = S.prog && S.prog.weeks.find(x => x.label === week);
+  if (dayNum !== 'comp' && wObj && !remaining(wObj).length) {
+    const idx = S.prog.weeks.findIndex(x => x.label === week);
+    if (idx >= 0 && idx < S.prog.weeks.length - 1 && S.wi === idx) S.wi = idx + 1;
   }
   if (wd === weekdayMon0() && week === (W() && W().label)) {
     S.today = { date: dstr(), type: 'rest', finished: 1, week, day: dayNum };
@@ -122,9 +373,17 @@ function cancelDayEdit() { S.dayEdit = null; save(); render(); }
 function liftKey(name) {
   return String(name || '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
-/** Fondamentali (o varianti già taggate s/b/d dal parser) */
+/** Fondamentali + varianti (panca paralimpica, squat con fermi, stacco sumo, ecc.) */
 function isMainLift(e) {
-  return !!(e && e.lift && (e.lift === 's' || e.lift === 'b' || e.lift === 'd'));
+  if (!e) return false;
+  if (e.lift === 's' || e.lift === 'b' || e.lift === 'd') return true;
+  const n = String(e.name || '').toLowerCase();
+  if (/riscaldamento|\bpre\b/.test(n)) return false;
+  // squat / panca / stacco e varianti comuni
+  if (/\bsquat\b|\bacconsc|front squat|box squat/.test(n)) return true;
+  if (/\bpanca\b|bench/.test(n)) return true;
+  if (/\bstacco\b|deadlift|\bsumo\b|\bregular\b/.test(n)) return true;
+  return false;
 }
 /** Complementari = non riscaldamento e non fondamentale */
 function isAccessory(e) {
@@ -141,28 +400,270 @@ function setRestSec(name, sec) {
   S.restByEx[liftKey(name)] = n;
   save();
 }
-function getAccLog(week, day, i) {
+/** Quante serie ha l'esercizio (dal testo scheda) */
+function parseSets(text) {
+  const t = String(text || '');
+  // 10-8-6-4 o 5-5-5
+  const seq = t.match(/\b(\d+(?:\s*-\s*\d+){1,})\b/);
+  if (seq) {
+    const parts = seq[1].split(/\s*-\s*/).map(n => parseInt(n, 10)).filter(n => n > 0);
+    if (parts.length >= 2) return { count: parts.length, targets: parts };
+  }
+  // 3x8 / 3×8 / 5x3s → serie x rip
+  let m = t.match(/(\d+)\s*[x×]\s*(\d+)\s*s\b/i);
+  if (m) return { count: parseInt(m[2], 10) || 3, targets: null, reps: parseInt(m[1], 10) };
+  m = t.match(/(\d+)\s*[x×]\s*(\d+)/i);
+  if (m) return { count: parseInt(m[1], 10) || 3, targets: null, reps: parseInt(m[2], 10) };
+  // "3 serie" / "4 sets"
+  m = t.match(/(\d+)\s*(?:serie|sets?)\b/i);
+  if (m) return { count: parseInt(m[1], 10) || 3, targets: null };
+  return { count: 3, targets: null };
+}
+function prescribedKg(text, lift) {
+  if (!lift || !S.max || !S.max[lift]) return null;
+  const m = String(text || '').match(/(\d+(?:[.,]\d+)?)\s*%/);
+  if (!m) return null;
+  const pct = parseFloat(m[1].replace(',', '.'));
+  if (isNaN(pct)) return null;
+  return Math.round(pct / 100 * S.max[lift] / 2.5) * 2.5;
+}
+function getExLog(week, day, i, setCount) {
   const k = week + '|' + day;
   S.accLog = S.accLog || {};
   S.accLog[k] = S.accLog[k] || {};
-  S.accLog[k][i] = S.accLog[k][i] || { kg: '', reps: '' };
-  return S.accLog[k][i];
+  let row = S.accLog[k][i];
+  // migrazione vecchio formato {kg,reps}
+  if (row && !Array.isArray(row.sets) && (row.kg != null || row.reps != null)) {
+    row = { sets: [{ kg: row.kg || '', reps: row.reps || '' }] };
+    S.accLog[k][i] = row;
+  }
+  if (!row || !Array.isArray(row.sets)) {
+    row = { sets: [] };
+    S.accLog[k][i] = row;
+  }
+  const n = Math.max(1, setCount || row.sets.length || 3);
+  while (row.sets.length < n) row.sets.push({ kg: '', reps: '', done: false });
+  if (row.sets.length > n) row.sets.length = n;
+  row.sets.forEach(s => { if (s.done == null) s.done = false; });
+  return row;
 }
-function setAccLog(week, day, i, field, value) {
-  const row = getAccLog(week, day, i);
-  row[field] = value;
+function setExSetLog(week, day, i, setIdx, field, value, skipSave) {
+  const row = getExLog(week, day, i);
+  if (!row.sets[setIdx]) row.sets[setIdx] = { kg: '', reps: '', done: false };
+  // non modificare kg/rip se la serie è già fatta
+  if (row.sets[setIdx].done && (field === 'kg' || field === 'reps')) return;
+  // salva SOLO il campo corrente (niente cascade qui → altrimenti su mobile resta solo la 1ª cifra)
+  row.sets[setIdx][field] = value;
+  if (!skipSave) save();
+}
+/** Propaga i kg alle serie successive vuote — chiamare solo su blur/change, non su ogni tasto */
+function cascadeKgFromSet(week, day, i, setIdx) {
+  const row = getExLog(week, day, i);
+  if (!row.sets[setIdx]) return;
+  const value = row.sets[setIdx].kg;
+  if (value === '' || value == null) return;
+  const active = document.activeElement;
+  let dirty = false;
+  for (let j = setIdx + 1; j < row.sets.length; j++) {
+    if (row.sets[j].done) continue;
+    if (row.sets[j].kg !== '' && row.sets[j].kg != null) continue;
+    row.sets[j].kg = value;
+    dirty = true;
+  }
+  if (dirty) save();
+  // aggiorna solo i campi DOM non attivi
+  try {
+    document.querySelectorAll('.set-card').forEach(c => {
+      if (c.getAttribute('data-week') !== String(week)) return;
+      if (Number(c.getAttribute('data-day')) !== Number(day)) return;
+      if (Number(c.getAttribute('data-exi')) !== Number(i)) return;
+      const seti = Number(c.getAttribute('data-set'));
+      if (seti <= setIdx) return;
+      if (row.sets[seti] && row.sets[seti].done) return;
+      const inp = c.querySelector('input');
+      if (inp && inp !== active && (inp.value === '' || inp.value == null)) {
+        inp.value = value;
+        inp.classList.add('kg-suggested');
+      }
+    });
+  } catch (e) {}
+}
+function prevSetKg(log, setIdx) {
+  if (!log || !log.sets) return '';
+  for (let j = setIdx - 1; j >= 0; j--) {
+    const k = log.sets[j] && log.sets[j].kg;
+    if (k !== '' && k != null) return String(k);
+  }
+  return '';
+}
+/** Salva kg/rip dai campi input PRIMA di un re-render (altrimenti si perdono) */
+function flushSetInputsFromDOM() {
+  let dirty = false;
+  document.querySelectorAll('.set-card').forEach(card => {
+    const week = card.getAttribute('data-week');
+    const day = Number(card.getAttribute('data-day'));
+    const exi = Number(card.getAttribute('data-exi'));
+    const seti = Number(card.getAttribute('data-set'));
+    if (week == null || Number.isNaN(exi) || Number.isNaN(seti)) return;
+    const inputs = card.querySelectorAll('input[type="number"], input:not([type])');
+    const row = getExLog(week, day, exi);
+    if (!row.sets[seti]) row.sets[seti] = { kg: '', reps: '', done: false };
+    if (row.sets[seti].done) return; // serie fatta: non toccare kg/rip
+    let n = 0;
+    inputs.forEach(inp => {
+      const val = inp.value;
+      if (n === 0) {
+        if (row.sets[seti].kg !== val) { row.sets[seti].kg = val; dirty = true; }
+      } else if (n === 1) {
+        if (row.sets[seti].reps !== val) { row.sets[seti].reps = val; dirty = true; }
+      }
+      n++;
+    });
+  });
+  if (dirty) save();
+}
+function markSetDone(week, day, i, setIdx, done) {
+  const row = getExLog(week, day, i);
+  if (!row.sets[setIdx]) row.sets[setIdx] = { kg: '', reps: '', done: false };
+  row.sets[setIdx].done = done !== false;
+  // se tutte le serie sono fatte → completa automaticamente l'esercizio
+  syncExerciseDoneFromSets(week, day, i);
   save();
 }
-function pushLiftHistory(name, kg, reps, week, day) {
-  if (kg === '' || kg == null || reps === '' || reps == null) return;
-  const kgN = parseFloat(String(kg).replace(',', '.'));
-  const repsN = parseInt(reps, 10);
-  if (isNaN(kgN) || isNaN(repsN)) return;
+/** Allinea S.chk con lo stato delle serie */
+function syncExerciseDoneFromSets(week, day, i) {
+  const wObj = (S.prog && S.prog.weeks.find(x => x.label === week)) || W();
+  if (!wObj) return;
+  const exs = dayExercises(wObj, day);
+  if (!exs || !exs[i] || exs[i].warm) return;
+  const info = parseSets(exs[i].text);
+  const row = getExLog(week, day, i, info.count);
+  const allDone = row.sets.length > 0 && row.sets.every(s => !!s.done);
+  const k = week + '|' + day;
+  S.chk[k] = S.chk[k] || [];
+  const idx = S.chk[k].indexOf(i);
+  if (allDone && idx < 0) S.chk[k].push(i);
+  if (!allDone && idx >= 0) S.chk[k].splice(idx, 1);
+}
+/** Etichetta settimana precedente nel programma */
+function prevWeekLabel(currentLabel) {
+  if (!S.prog || !S.prog.weeks || !S.prog.weeks.length) return null;
+  const i = S.prog.weeks.findIndex(w => w.label === currentLabel);
+  if (i > 0) return S.prog.weeks[i - 1].label;
+  return null;
+}
+/** Serie loggate per un esercizio (stesso giorno) nella settimana precedente o nello storico */
+function findPrevAccessorySets(exerciseName, currentWeek, day) {
+  if (!exerciseName) return null;
+  const key = liftKey(exerciseName);
+  const dayN = Number(day);
+
+  // 1) stesso giorno nella settimana precedente del programma
+  const prev = prevWeekLabel(currentWeek);
+  if (prev) {
+    const wPrev = S.prog.weeks.find(w => w.label === prev);
+    if (wPrev) {
+      const exs = dayExercises(wPrev, dayN);
+      if (exs && exs.length) {
+        const idx = exs.findIndex(e => !e.warm && liftKey(e.name) === key);
+        if (idx >= 0) {
+          const info = parseSets(exs[idx].text);
+          const log = getExLog(prev, dayN, idx, info.count);
+          const sets = (log.sets || []).filter(s =>
+            (s.kg !== '' && s.kg != null) || (s.reps !== '' && s.reps != null)
+          );
+          if (sets.length) {
+            return {
+              week: prev,
+              sets: log.sets.map(s => ({
+                kg: s.kg !== '' && s.kg != null ? s.kg : '',
+                reps: s.reps !== '' && s.reps != null ? s.reps : '',
+              })),
+            };
+          }
+        }
+      }
+    }
+    // prova anche workoutLog della settimana precedente
+    const fromLog = (S.workoutLog || []).find(w =>
+      w.week === prev && Number(w.day) === dayN &&
+      (w.exercises || []).some(e => liftKey(e.name) === key && e.sets && e.sets.some(x => x.kg != null || x.reps != null))
+    );
+    if (fromLog) {
+      const ex = fromLog.exercises.find(e => liftKey(e.name) === key);
+      if (ex && ex.sets && ex.sets.length) {
+        return {
+          week: prev,
+          sets: ex.sets.map(s => ({
+            kg: s.kg != null ? s.kg : '',
+            reps: s.reps != null ? s.reps : '',
+          })),
+        };
+      }
+    }
+  }
+
+  // 2) fallback: liftHistory (stesso day se possibile)
+  const hist = lastLiftHistory(exerciseName, 15);
+  const entry = hist.find(h => h.week && h.week !== currentWeek && (h.day == null || Number(h.day) === dayN))
+    || hist.find(h => h.week !== currentWeek)
+    || hist[0];
+  if (entry && entry.sets && entry.sets.length) {
+    return {
+      week: entry.week || entry.date || 'scorsa',
+      sets: entry.sets.map(s => ({
+        kg: s.kg != null ? s.kg : '',
+        reps: s.reps != null ? s.reps : '',
+      })),
+    };
+  }
+  // vecchio formato storico senza sets
+  if (entry && (entry.kg != null || entry.reps != null)) {
+    return {
+      week: entry.week || entry.date || 'scorsa',
+      sets: [{ kg: entry.kg != null ? entry.kg : '', reps: entry.reps != null ? entry.reps : '' }],
+    };
+  }
+  return null;
+}
+/**
+ * Solo complementari: se i campi di questa settimana sono vuoti,
+ * precompila con kg/rip della stessa giornata della settimana prima.
+ * Non sovrascrive valori già inseriti.
+ */
+function prefillAccessoryFromPrev(weekLabel, day, exIndex, exercise) {
+  if (!exercise || exercise.warm || isMainLift(exercise)) return null;
+  const prev = findPrevAccessorySets(exercise.name, weekLabel, day);
+  if (!prev || !prev.sets || !prev.sets.length) return null;
+  const info = parseSets(exercise.text);
+  const log = getExLog(weekLabel, day, exIndex, info.count);
+  let changed = false;
+  log.sets.forEach((s, si) => {
+    const p = prev.sets[si] || prev.sets[Math.min(si, prev.sets.length - 1)];
+    if (!p) return;
+    if ((s.kg === '' || s.kg == null) && p.kg !== '' && p.kg != null) {
+      s.kg = p.kg;
+      changed = true;
+    }
+    if ((s.reps === '' || s.reps == null) && p.reps !== '' && p.reps != null) {
+      s.reps = p.reps;
+      changed = true;
+    }
+  });
+  if (changed) save();
+  return prev;
+}
+function pushLiftHistory(name, sets, week, day) {
+  const clean = (sets || []).map(s => ({
+    kg: parseFloat(String(s.kg).replace(',', '.')),
+    reps: parseInt(s.reps, 10)
+  })).filter(s => !isNaN(s.kg) && !isNaN(s.reps));
+  if (!clean.length) return;
   const key = liftKey(name);
   S.liftHistory = S.liftHistory || {};
   S.liftHistory[key] = S.liftHistory[key] || [];
   S.liftHistory[key] = S.liftHistory[key].filter(h => h.date !== dstr());
-  S.liftHistory[key].unshift({ date: dstr(), kg: kgN, reps: repsN, week: week || '', day: day });
+  S.liftHistory[key].unshift({ date: dstr(), sets: clean, week: week || '', day: day });
   if (S.liftHistory[key].length > 40) S.liftHistory[key].length = 40;
 }
 function lastLiftHistory(name, n) {
@@ -170,20 +671,144 @@ function lastLiftHistory(name, n) {
   return list.slice(0, n || 5);
 }
 function historyHtml(name) {
-  const rows = lastLiftHistory(name, 5);
+  const rows = lastLiftHistory(name, 4);
   if (!rows.length) return '<p class="hist mut">Nessuno storico ancora</p>';
-  return '<div class="hist">' + rows.map(h =>
-    `<span class="hist-row"><b>${h.kg} kg</b> × ${h.reps} <i>${esc(h.date).slice(5)}</i></span>`
-  ).join('') + '</div>';
+  return '<div class="hist">' + rows.map(h => {
+    const sets = h.sets || (h.kg != null ? [{ kg: h.kg, reps: h.reps }] : []);
+    const txt = sets.map(s => s.kg + '×' + s.reps).join(', ');
+    return `<span class="hist-row"><b>${esc(txt)}</b> <i>${esc(String(h.date || '')).slice(5)}</i></span>`;
+  }).join('') + '</div>';
 }
 function saveSessionLogs(week, day, exercises) {
   if (!exercises) return;
   exercises.forEach((e, i) => {
-    if (!isAccessory(e)) return;
-    const log = getAccLog(week, day, i);
-    pushLiftHistory(e.name, log.kg, log.reps, week, day);
+    if (e.warm) return;
+    const info = parseSets(e.text);
+    const log = getExLog(week, day, i, info.count);
+    if (isMainLift(e)) {
+      let lift = e.lift;
+      if (!lift) {
+        const n = String(e.name || '').toLowerCase();
+        if (/squat|acconsc/.test(n)) lift = 's';
+        else if (/panca|bench/.test(n)) lift = 'b';
+        else if (/stacco|deadlift|sumo|regular/.test(n)) lift = 'd';
+      }
+      const kg = prescribedKg(e.text, lift);
+      const sets = log.sets.map((s, si) => ({
+        kg: kg != null ? kg : s.kg,
+        reps: (info.targets ? info.targets[si] : info.reps) != null ? (info.targets ? info.targets[si] : info.reps) : s.reps,
+        done: s.done,
+      }));
+      pushLiftHistory(e.name, sets, week, day);
+    } else {
+      pushLiftHistory(e.name, log.sets, week, day);
+    }
   });
   save();
+}
+/** HTML card per ogni serie */
+function setsLogHtml(weekLabel, day, exIndex, exercise) {
+  const info = parseSets(exercise.text);
+  // complementari: pesca kg/rip dalla stessa giornata della settimana precedente
+  const prevInfo = (!exercise.warm && !isMainLift(exercise))
+    ? prefillAccessoryFromPrev(weekLabel, day, exIndex, exercise)
+    : null;
+  const log = getExLog(weekLabel, day, exIndex, info.count);
+  // per fondamentali usa sempre il lift taggato o ricavato
+  let lift = exercise.lift;
+  if (!lift && isMainLift(exercise)) {
+    const n = String(exercise.name || '').toLowerCase();
+    if (/squat|acconsc/.test(n)) lift = 's';
+    else if (/panca|bench/.test(n)) lift = 'b';
+    else if (/stacco|deadlift|sumo|regular/.test(n)) lift = 'd';
+  }
+  const sugKg = prescribedKg(exercise.text, lift);
+  const main = isMainLift(exercise);
+  const hasRpe = /\brpe\b/i.test(String(exercise.text || ''));
+  // fondamentali: di default bloccati; se c'è RPE → kg modificabile, rip no
+  const kgEditable = !main || hasRpe;
+  const repsEditable = !main;
+  const fullyLocked = main && !hasRpe;
+  const wJs = JSON.stringify(weekLabel);
+  const restSec = getRestSec(exercise.name);
+  return `<div class="sets-wrap ${fullyLocked ? 'sets-locked' : ''}">
+    ${log.sets.map((s, si) => {
+      const target = info.targets ? info.targets[si] : info.reps;
+      const isDone = !!s.done;
+      const prescRep = target != null ? target : null;
+      const prescKg = sugKg != null ? sugKg : null;
+      let inputs = '';
+      // serie fatta → solo lettura (sbarra); per modificare togli "fatta"
+      if (isDone) {
+        const kgShow = (s.kg !== '' && s.kg != null) ? String(s.kg).replace('.', ',') + ' kg'
+          : (prescKg != null ? String(prescKg).replace('.', ',') + ' kg' : '— kg');
+        const repShow = (s.reps !== '' && s.reps != null) ? String(s.reps) + ' rip'
+          : (prescRep != null ? String(prescRep) + ' rip' : '— rip');
+        inputs = `<div class="set-readonly set-done-ro">
+             <span class="set-ro-kg">${esc(kgShow)}</span>
+             <span class="set-x">×</span>
+             <span class="set-ro-reps">${esc(repShow)}</span>
+           </div>
+           <p class="set-lock-hint">Serie fatta · tocca la card per sbloccare</p>`;
+      } else if (fullyLocked) {
+        const kgLabel = prescKg != null ? String(prescKg).replace('.', ',') + ' kg' : '— kg';
+        const repLabel = prescRep != null ? String(prescRep) + ' rip' : '— rip';
+        inputs = `<div class="set-readonly">
+             <span class="set-ro-kg">${esc(kgLabel)}</span>
+             <span class="set-x">×</span>
+             <span class="set-ro-reps">${esc(repLabel)}</span>
+           </div>
+           <p class="set-lock-hint">Fisso dalla scheda (fondamentale)</p>`;
+      } else if (main && hasRpe) {
+        // kg editabile, rip fisse
+        const repLabel = prescRep != null ? String(prescRep) + ' rip' : '— rip';
+        const fromPrev = prevSetKg(log, si);
+        const kgVal = s.kg != null && s.kg !== '' ? esc(String(s.kg)) : '';
+        const kgPh = fromPrev ? String(fromPrev) : (prescKg != null ? String(prescKg) : 'kg');
+        inputs = `<div class="set-inputs set-rpe">
+             <input type="number" inputmode="decimal" step="0.5" placeholder="${esc(kgPh)}" value="${kgVal}"
+               oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)"
+               onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
+             <span class="set-x">×</span>
+             <span class="set-ro-reps set-ro-inline">${esc(repLabel)}</span>
+           </div>
+           <p class="set-lock-hint">RPE · puoi impostare i kg · rip fisse</p>`;
+      } else {
+        const pSet = prevInfo && prevInfo.sets ? (prevInfo.sets[si] || prevInfo.sets[prevInfo.sets.length - 1]) : null;
+        const prevHint = pSet && ((pSet.kg !== '' && pSet.kg != null) || (pSet.reps !== '' && pSet.reps != null))
+          ? `<p class="set-prev-hint">Scorsa (${esc(String(prevInfo.week))}): <b>${pSet.kg !== '' && pSet.kg != null ? esc(String(pSet.kg)) + ' kg' : '—'} × ${pSet.reps !== '' && pSet.reps != null ? esc(String(pSet.reps)) + ' rip' : '—'}</b> · cerca di migliorare</p>`
+          : '';
+        const fromPrev = prevSetKg(log, si);
+        const kgVal = s.kg != null && s.kg !== '' ? esc(String(s.kg)) : '';
+        const kgPh = fromPrev ? String(fromPrev) : 'kg';
+        const suggestNote = fromPrev && (s.kg === '' || s.kg == null)
+          ? `<p class="set-prev-hint">Suggerito serie prec.: <b>${esc(String(fromPrev))} kg</b> (placeholder)</p>`
+          : '';
+        inputs = `<div class="set-inputs">
+             <input type="number" inputmode="decimal" step="0.5" placeholder="${esc(kgPh)}" value="${kgVal}"
+               oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)"
+               onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
+             <span class="set-x">×</span>
+             <input type="number" inputmode="numeric" step="1" placeholder="${prescRep != null ? prescRep : 'rip'}" value="${s.reps != null && s.reps !== '' ? esc(String(s.reps)) : ''}"
+               oninput="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)">
+           </div>${suggestNote}${prevHint}`;
+      }
+      return `<div class="set-card ${isDone ? 'set-done' : ''} ${fullyLocked ? 'set-locked' : ''}"
+        data-ex="${esc(exercise.name)}"
+        data-week="${esc(weekLabel)}"
+        data-day="${day}"
+        data-exi="${exIndex}"
+        data-set="${si}"
+        role="button"
+        title="${isDone ? 'Serie fatta · tocca per annullare' : 'Tocca: segna fatta + recupero ' + fmtRest(restSec)}">
+        <div class="set-label">
+          <span class="set-title">${isDone ? '✓ ' : ''}Serie ${si + 1}${target != null && repsEditable ? ' · obiettivo ' + target + ' rip' : ''}</span>
+          <span class="set-rest-hint">${isDone ? 'fatta' : '⏱ ' + fmtRest(restSec)}</span>
+        </div>
+        ${inputs}
+      </div>`;
+    }).join('')}
+  </div>`;
 }
 /** secondi → "HH:MM:SS" per input type=time */
 function secToTimeValue(sec) {
@@ -511,11 +1136,30 @@ async function parseDocx(file) {
   }
   weeks.sort((a, b) => a.n - b.n);
   if (!weeks.length) throw new Error('Nessuna tabella con settimane trovata');
-  return { weeks };
+  return { weeks, id: null, name: null };
 }
 async function imp(inp) {
-  try { S.prog = await parseDocx(inp.files[0]); S.wi = 0; S.done = {}; S.chk = {}; S.weekLog = {}; S.today = null; save(); render() }
-  catch (e) { $('err').textContent = 'Errore: ' + e.message }
+  try {
+    const file = inp.files[0];
+    if (!file) return;
+    // archivia scheda attuale (lo storico allenamenti NON si cancella)
+    if (S.prog) archiveProg(S.prog);
+    const prog = await parseDocx(file);
+    ensureProgMeta(prog, file.name);
+    S.prog = prog;
+    archiveProg(S.prog); // anche la nuova entra nel catalogo
+    S.wi = 0;
+    S.chk = {};
+    S.today = null;
+    // Piano ricostruito dallo storico (pallini allenamenti + rest)
+    rebuildPianoFromStorico();
+    save();
+    render();
+  } catch (e) {
+    const err = $('err');
+    if (err) err.textContent = 'Errore: ' + e.message;
+    else alert('Errore: ' + e.message);
+  }
 }
 const coachImg = () => `<div class="coach-wrap"><img src="coach.jpg" alt="Leggi bene – Disciplina oggi, risultati domani" class="coach-img" loading="lazy"></div>`;
 const importCard = () => `<div class="card"><p class="big">Carica la scheda</p><p class="mut">Scegli il file .docx del coach. Viene letto sul tuo telefono.</p><label class="btn pri" style="margin-top:16px;cursor:pointer">Carica file .docx<input type="file" accept=".docx" style="display:none" onchange="imp(this)"></label><p id="err" class="mut"></p></div>${coachImg()}`;
@@ -574,7 +1218,10 @@ function setToday(type, day) {
   S.today = { date: dstr(), type, day: day != null ? day : null };
   if (type === 'rest' && S.prog) {
     const w = W();
-    if (w) logCal('rest', w.label);
+    if (w) {
+      addRestToStorico(w.label, weekdayMon0());
+      rebuildPianoFromStorico();
+    }
   }
   save();
   render();
@@ -598,13 +1245,43 @@ function askDay() {
   }
   S.today = { date: dstr(), type: 'ask' }; save(); render()
 }
+function markAllSetsDone(week, day, i, done) {
+  const wObj = (S.prog && S.prog.weeks.find(x => x.label === week)) || W();
+  if (!wObj) return;
+  const exs = dayExercises(wObj, day);
+  if (!exs || !exs[i] || exs[i].warm) return;
+  const info = parseSets(exs[i].text);
+  const row = getExLog(week, day, i, info.count);
+  row.sets.forEach(s => { s.done = !!done; });
+}
 function tg(i) {
+  try { flushSetInputsFromDOM(); } catch (e) {}
   const w = W();
   if (!w || !S.today || S.today.day == null) return;
-  const k = w.label + '|' + S.today.day;
+  const d = S.today.day;
+  const k = w.label + '|' + d;
   const a = S.chk[k] = S.chk[k] || [];
   const x = a.indexOf(i);
-  if (x < 0) a.push(i); else a.splice(x, 1);
+  if (x >= 0) {
+    // togli completato esercizio (le serie restano come sono)
+    a.splice(x, 1);
+    save();
+    render();
+    return;
+  }
+  // segna completato: se ci sono serie non fatte → conferma, poi marca TUTTE le serie
+  const exs = dayExercises(w, d);
+  const e = exs && exs[i];
+  if (e && !e.warm) {
+    const info = parseSets(e.text);
+    const row = getExLog(w.label, d, i, info.count);
+    const allDone = row.sets.length > 0 && row.sets.every(s => !!s.done);
+    if (!allDone) {
+      if (!confirm('Non tutte le serie risultano fatte.\nVuoi davvero segnare l\'esercizio come completato?\n(Verranno segnate fatte anche tutte le serie.)')) return;
+    }
+    markAllSetsDone(w.label, d, i, true);
+  }
+  if (a.indexOf(i) < 0) a.push(i);
   save();
   render();
 }
@@ -615,23 +1292,72 @@ function logFinishedWorkout(weekLabel, day) {
   if (!exs) return;
   const k = weekLabel + '|' + day;
   const ck = S.chk[k] || [];
+  if (S.prog) { ensureProgMeta(S.prog); archiveProg(S.prog); }
+  const wd = weekdayMon0();
+  // sostituisci eventuale segno piano / vecchio log stesso giorno
+  removeWorkoutLogByWeekDay(weekLabel, day, S.prog && S.prog.id);
+  removeStoricoByWeekWeekday(weekLabel, wd, S.prog && S.prog.id);
   const entry = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    type: 'train',
     date: dstr(),
     at: new Date().toISOString(),
     week: weekLabel,
+    weekday: wd,
     day: day,
     title: focus(w, day),
+    progId: S.prog ? S.prog.id : null,
+    progName: S.prog ? S.prog.name : 'Scheda',
+    progFileName: S.prog ? displayProgFileName(S.prog) : 'Scheda.docx',
     exercises: exs.map((e, i) => {
-      const log = isAccessory(e) ? getAccLog(weekLabel, day, i) : null;
+      let sets = null;
+      if (!e.warm) {
+        const info = parseSets(e.text);
+        const log = getExLog(weekLabel, day, i, info.count);
+        let lift = e.lift;
+        if (!lift && isMainLift(e)) {
+          const n = String(e.name || '').toLowerCase();
+          if (/squat|acconsc/.test(n)) lift = 's';
+          else if (/panca|bench/.test(n)) lift = 'b';
+          else if (/stacco|deadlift|sumo|regular/.test(n)) lift = 'd';
+        }
+        const prescKg = isMainLift(e) ? prescribedKg(e.text, lift) : null;
+        const hasRpe = /\brpe\b/i.test(String(e.text || ''));
+        sets = (log.sets || []).map((s, si) => {
+          const targetRep = info.targets ? info.targets[si] : info.reps;
+          let kgN = null, repsN = null;
+          if (isMainLift(e)) {
+            // con RPE usa i kg inseriti; senza RPE i kg dalla %
+            if (hasRpe && s.kg !== '' && s.kg != null) {
+              kgN = parseFloat(String(s.kg).replace(',', '.'));
+              if (isNaN(kgN)) kgN = prescKg;
+            } else {
+              kgN = prescKg;
+            }
+            repsN = targetRep != null ? Number(targetRep) : null;
+          } else {
+            const kgRaw = s.kg;
+            const repsRaw = s.reps;
+            kgN = kgRaw !== '' && kgRaw != null ? parseFloat(String(kgRaw).replace(',', '.')) : null;
+            repsN = repsRaw !== '' && repsRaw != null ? parseInt(repsRaw, 10) : null;
+            if (kgN != null && isNaN(kgN)) kgN = null;
+            if (repsN != null && isNaN(repsN)) repsN = null;
+          }
+          return {
+            n: si + 1,
+            kg: kgN,
+            reps: repsN,
+            done: !!s.done,
+          };
+        });
+      }
       return {
         name: e.name,
         warm: !!e.warm,
         main: isMainLift(e),
         text: e.text || '',
-        done: ck.includes(i),
-        kg: log && log.kg !== '' ? log.kg : null,
-        reps: log && log.reps !== '' ? log.reps : null,
+        done: ck.includes(i) || (sets && sets.some(x => x.done)),
+        sets: sets,
       };
     }),
   };
@@ -640,13 +1366,21 @@ function logFinishedWorkout(weekLabel, day) {
   if (S.workoutLog.length > 100) S.workoutLog.length = 100;
 }
 function deleteWorkoutLog(id) {
-  if (!confirm('Eliminare questo allenamento dallo storico?')) return;
+  if (!confirm('Eliminare questa voce dallo storico?\nIl Piano si aggiornerà di conseguenza.')) return;
   if (!confirm('Sei sicuro? Non si può annullare.')) return;
+  const entry = (S.workoutLog || []).find(x => x.id === id);
   S.workoutLog = (S.workoutLog || []).filter(x => x.id !== id);
+  if (entry && entry.week != null && entry.day != null && entry.day !== 'comp') {
+    const k = entry.week + '|' + entry.day;
+    if (S.chk) delete S.chk[k];
+    if (S.accLog) delete S.accLog[k];
+  }
+  rebuildPianoFromStorico();
   save();
   render();
 }
 function finish() {
+  try { flushSetInputsFromDOM(); } catch (e) {}
   const w = W();
   if (!w || !S.today) return;
   const d = Number(S.today.day);
@@ -658,7 +1392,7 @@ function finish() {
     saveSessionLogs(weekLabel, d, exs);
     logFinishedWorkout(weekLabel, d);
   }
-  logCal('train', weekLabel, weekdayMon0(), d);
+  rebuildPianoFromStorico();
   if (!remaining(w).length && S.wi < S.prog.weeks.length - 1) S.wi++;
   S.today = { date: dstr(), type: 'rest', finished: 1, week: weekLabel, day: d };
   save();
@@ -806,24 +1540,16 @@ function renderTrainSession(week, day) {
 
   const list = ex.map((e, i) => {
     const acc = isAccessory(e);
-    const log = acc ? getAccLog(week.label, d, i) : null;
     const rest = !e.warm ? getRestSec(e.name) : 0;
-    const hist = acc ? historyHtml(e.name) : '';
-    const nmJs = JSON.stringify(e.name); // stringa JS sicura
+    const hist = !e.warm ? historyHtml(e.name) : '';
+    const nmJs = JSON.stringify(e.name);
     const timerBtn = !e.warm
       ? `<div class="rest-row">
           <button type="button" class="rest-start" data-ex="${esc(e.name)}" onclick='startRest(${nmJs}, event)'>⏱ Avvia ${fmtRest(rest)}</button>
           <button type="button" class="rest-set" data-ex="${esc(e.name)}" onclick='openRestPicker(${nmJs}, event)'>Tempo</button>
         </div>`
       : '';
-    const logRow = acc
-      ? `<div class="ex-log">
-          <input type="number" inputmode="decimal" step="0.5" placeholder="kg" value="${log.kg}"
-            onclick="event.stopPropagation()" onchange="setAccLog(${JSON.stringify(week.label)},${d},${i},'kg',this.value)">
-          <input type="number" inputmode="numeric" step="1" placeholder="rip" value="${log.reps}"
-            onclick="event.stopPropagation()" onchange="setAccLog(${JSON.stringify(week.label)},${d},${i},'reps',this.value)">
-        </div>${hist}`
-      : '';
+    const setsBlock = !e.warm ? (setsLogHtml(week.label, d, i, e) + hist) : '';
     return `<div class="ex ${e.warm ? 'w' : ''} ${e.lift ? 'main' : ''} ${acc ? 'acc' : ''} ${ck.includes(i) ? 'ok' : ''}">
       <div class="n" onclick="tg(${i})" role="button">${ck.includes(i) ? '✓' : (i + 1)}</div>
       <div class="ex-body">
@@ -831,7 +1557,7 @@ function renderTrainSession(week, day) {
           <div class="nm">${esc(e.name)}</div>
           <div class="dt">${fmt(e.text, e.lift)}</div>
         </div>
-        ${logRow}
+        ${setsBlock}
         ${timerBtn}
       </div>
     </div>`;
@@ -871,28 +1597,372 @@ function updateMax(lift, inputElement) {
 }
 
 
-function storico() {
+
+function csvEsc(v) {
+  const t = v == null ? '' : String(v);
+  if (/[",\n\r]/.test(t)) return '"' + t.replace(/"/g, '""') + '"';
+  return t;
+}
+function csvParse(text) {
+  const rows = [];
+  let i = 0, field = '', row = [], inQ = false;
+  const s = String(text).replace(/^\uFEFF/, '');
+  while (i < s.length) {
+    const c = s[i];
+    if (inQ) {
+      if (c === '"') {
+        if (s[i + 1] === '"') { field += '"'; i += 2; continue; }
+        inQ = false; i++; continue;
+      }
+      field += c; i++; continue;
+    }
+    if (c === '"') { inQ = true; i++; continue; }
+    if (c === ',') { row.push(field); field = ''; i++; continue; }
+    if (c === '\n' || c === '\r') {
+      if (c === '\r' && s[i + 1] === '\n') i++;
+      row.push(field); field = '';
+      if (row.some(x => x !== '')) rows.push(row);
+      row = []; i++; continue;
+    }
+    field += c; i++;
+  }
+  row.push(field);
+  if (row.some(x => x !== '')) rows.push(row);
+  return rows;
+}
+function exportWorkoutCsv() {
   const list = S.workoutLog || [];
   if (!list.length) {
-    return `<div class="card"><p class="big">Storico allenamenti</p>
-      <p class="mut">Quando termini un allenamento comparirà qui, con esercizi e carichi dei complementari.</p>
+    alert('Nessun allenamento nello storico da esportare.');
+    return;
+  }
+  const headers = ['workout_id','date','at','prog_id','prog_name','week','day','title','exercise','warm','main','exercise_done','set_n','kg','reps','set_done'];
+  const lines = [headers.join(',')];
+  list.forEach(w => {
+    const exs = w.exercises && w.exercises.length ? w.exercises : [{ name: '', warm: 0, main: 0, done: 0, sets: [] }];
+    exs.forEach(e => {
+      const sets = (e.sets && e.sets.length)
+        ? e.sets
+        : [{ n: 1, kg: e.kg, reps: e.reps, done: e.done }];
+      sets.forEach((st, si) => {
+        lines.push([
+          csvEsc(w.id),
+          csvEsc(w.date),
+          csvEsc(w.at || ''),
+          csvEsc(w.progId || ''),
+          csvEsc(w.progName || ''),
+          csvEsc(w.week),
+          csvEsc(w.day),
+          csvEsc(w.title || ''),
+          csvEsc(e.name || ''),
+          e.warm ? 1 : 0,
+          e.main ? 1 : 0,
+          e.done ? 1 : 0,
+          st.n != null ? st.n : (si + 1),
+          st.kg != null && st.kg !== '' ? st.kg : '',
+          st.reps != null && st.reps !== '' ? st.reps : '',
+          st.done ? 1 : 0
+        ].join(','));
+      });
+    });
+  });
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'storico-allenamenti-' + dstr() + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 500);
+}
+/** Controlla che i workout del CSV combacino con la scheda caricata */
+function validateWorkoutsAgainstProg(workouts) {
+  const progs = allKnownProgs();
+  if (!progs.length) {
+    return 'Carica prima almeno una scheda di allenamento (.docx) dal Piano, poi importa il CSV.';
+  }
+  for (const w of workouts) {
+    if (!w.week) return 'CSV non valido: manca la colonna week / settimana.';
+    const matched = findProgForWorkout(w);
+    if (!matched) {
+      const weeks = progs.flatMap(p => (p.weeks || []).map(x => x.label)).join(', ');
+      return 'Errore: allenamento ' + w.week + ' giorno ' + w.day +
+        ' non corrisponde a nessuna scheda presente in app.\n' +
+        'Settimane note: ' + weeks;
+    }
+    w.progId = w.progId || matched.id;
+    w.progName = w.progName || matched.name;
+  }
+  return null;
+}
+function workoutsFromCsvRows(rows) {
+  if (!rows || rows.length < 2) throw new Error('File CSV vuoto o senza dati.');
+  const header = rows[0].map(h => String(h).trim().toLowerCase());
+  const need = ['week', 'day', 'exercise'];
+  for (const n of need) {
+    if (!header.includes(n) && !header.includes(n + '_id')) {
+      // week required
+    }
+  }
+  const col = (name) => {
+    const alts = {
+      workout_id: ['workout_id', 'id', 'workout'],
+      date: ['date', 'data'],
+      at: ['at', 'timestamp', 'iso'],
+      week: ['week', 'settimana', 'week_label'],
+      day: ['day', 'giorno'],
+      title: ['title', 'titolo', 'focus'],
+      exercise: ['exercise', 'esercizio', 'name', 'nome'],
+      warm: ['warm', 'warmup', 'riscaldamento'],
+      main: ['main', 'fondamentale'],
+      exercise_done: ['exercise_done', 'ex_done', 'done_ex'],
+      set_n: ['set_n', 'serie', 'set', 'n'],
+      kg: ['kg', 'weight', 'peso'],
+      reps: ['reps', 'rip', 'rep', 'ripetizioni'],
+      set_done: ['set_done', 'done', 'fatta']
+    };
+    const list = alts[name] || [name];
+    for (const a of list) {
+      const i = header.indexOf(a);
+      if (i >= 0) return i;
+    }
+    return -1;
+  };
+  const iWeek = col('week'), iDay = col('day'), iEx = col('exercise');
+  if (iWeek < 0 || iDay < 0 || iEx < 0) {
+    throw new Error('CSV non valido: servono almeno le colonne week, day, exercise.');
+  }
+  const iId = col('workout_id'), iDate = col('date'), iAt = col('at'), iTitle = col('title');
+  const iProgId = header.indexOf('prog_id'), iProgName = header.indexOf('prog_name');
+  const iWarm = col('warm'), iMain = col('main'), iExDone = col('exercise_done');
+  const iSetN = col('set_n'), iKg = col('kg'), iReps = col('reps'), iSetDone = col('set_done');
+
+  const map = new Map(); // key = id or date|week|day
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row || !row.length) continue;
+    const week = String(row[iWeek] || '').trim();
+    const day = String(row[iDay] || '').trim();
+    const exName = String(row[iEx] || '').trim();
+    if (!week && !day && !exName) continue;
+    const id = iId >= 0 && row[iId] ? String(row[iId]).trim() : (week + '|' + day + '|' + (iDate >= 0 ? row[iDate] : r));
+    if (!map.has(id)) {
+      map.set(id, {
+        id: id,
+        date: iDate >= 0 ? String(row[iDate] || dstr()).trim() : dstr(),
+        at: iAt >= 0 ? String(row[iAt] || '').trim() : new Date().toISOString(),
+        week: week,
+        day: /^\d+$/.test(day) ? Number(day) : day,
+        title: iTitle >= 0 ? String(row[iTitle] || '').trim() : '',
+        progId: iProgId >= 0 ? String(row[iProgId] || '').trim() : '',
+        progName: iProgName >= 0 ? String(row[iProgName] || '').trim() : '',
+        exercises: []
+      });
+    }
+    const w = map.get(id);
+    let ex = w.exercises.find(e => e.name === exName);
+    if (!ex) {
+      ex = {
+        name: exName,
+        warm: iWarm >= 0 ? (row[iWarm] === '1' || row[iWarm] === 'true') : false,
+        main: iMain >= 0 ? (row[iMain] === '1' || row[iMain] === 'true') : false,
+        done: iExDone >= 0 ? (row[iExDone] === '1' || row[iExDone] === 'true') : false,
+        sets: []
+      };
+      w.exercises.push(ex);
+    }
+    const sn = iSetN >= 0 && row[iSetN] !== '' ? Number(row[iSetN]) : (ex.sets.length + 1);
+    const kgRaw = iKg >= 0 ? row[iKg] : '';
+    const repsRaw = iReps >= 0 ? row[iReps] : '';
+    const kgN = kgRaw !== '' && kgRaw != null ? parseFloat(String(kgRaw).replace(',', '.')) : null;
+    const repsN = repsRaw !== '' && repsRaw != null ? parseInt(repsRaw, 10) : null;
+    ex.sets.push({
+      n: Number.isNaN(sn) ? ex.sets.length + 1 : sn,
+      kg: kgN != null && !isNaN(kgN) ? kgN : null,
+      reps: repsN != null && !isNaN(repsN) ? repsN : null,
+      done: iSetDone >= 0 ? (row[iSetDone] === '1' || row[iSetDone] === 'true') : false
+    });
+  }
+  return [...map.values()];
+}
+function importWorkoutCsvFile(input) {
+  const file = input && input.files && input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function () {
+    try {
+      const rows = csvParse(reader.result);
+      const workouts = workoutsFromCsvRows(rows);
+      if (!workouts.length) {
+        alert('Nessun allenamento trovato nel CSV.');
+        input.value = '';
+        return;
+      }
+      const err = validateWorkoutsAgainstProg(workouts);
+      if (err) {
+        alert(err);
+        input.value = '';
+        return;
+      }
+      let replace = false;
+      if ((S.workoutLog || []).length) {
+        replace = confirm(
+          'Trovati ' + workouts.length + ' allenamenti validi.\n\n' +
+          'OK = SOSTITUISCI tutto lo storico\n' +
+          'Annulla = AGGIUNGI a quelli esistenti'
+        );
+      } else if (!confirm('Importare ' + workouts.length + ' allenamenti nello storico?')) {
+        input.value = '';
+        return;
+      }
+      if (replace) {
+        const histProgIds = new Set((S.workoutLog || []).map(x => x.progId).filter(Boolean));
+        const csvProgIds = new Set(workouts.map(x => x.progId).filter(Boolean));
+        const missing = [...histProgIds].filter(id => !csvProgIds.has(id));
+        if (missing.length) {
+          const names = missing.map(id => {
+            const p = (S.progCatalog || []).find(x => x.id === id);
+            const fromLog = (S.workoutLog || []).find(x => x.progId === id);
+            return (p && p.name) || (fromLog && fromLog.progName) || id;
+          });
+          alert(
+            'Impossibile sostituire: il CSV non contiene tutte le schede già presenti nello storico.\n' +
+            'Schede mancanti: ' + names.join(', ') + '\n\n' +
+            'Esporta prima lo storico completo, oppure scegli AGGIUNGI.'
+          );
+          input.value = '';
+          return;
+        }
+        S.workoutLog = workouts;
+      } else {
+        const ids = new Set((S.workoutLog || []).map(w => w.id));
+        const toAdd = workouts.filter(w => !ids.has(w.id));
+        S.workoutLog = toAdd.concat(S.workoutLog || []);
+        if (S.workoutLog.length > 200) S.workoutLog.length = 200;
+      }
+      rebuildPianoFromStorico();
+      save();
+      render();
+      alert('Import completato: ' + workouts.length + ' allenamenti.');
+    } catch (e) {
+      alert('Errore lettura CSV: ' + (e && e.message ? e.message : e));
+    }
+    input.value = '';
+  };
+  reader.onerror = function () {
+    alert('Impossibile leggere il file.');
+    input.value = '';
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+function formatSetLine(s, idx) {
+  const n = s.n != null ? s.n : (idx + 1);
+  const kg = s.kg != null && s.kg !== '' ? String(s.kg).replace('.', ',') + ' kg' : '— kg';
+  const reps = s.reps != null && s.reps !== '' ? String(s.reps) + ' rip' : '— rip';
+  const mark = s.done ? '✓' : '·';
+  return `<div class="hist-set ${s.done ? 'done' : ''}"><span class="hist-set-n">${mark} Serie ${n}</span><span class="hist-set-val">${esc(kg)} × ${esc(reps)}</span></div>`;
+}
+function storico() {
+  const list = S.workoutLog || [];
+  const tools = `<div class="card hist-tools">
+    <p class="big" style="font-size:16px;margin:0 0 8px">Esporta / Importa</p>
+    <p class="mut" style="margin-bottom:10px">CSV con kg e rip di ogni serie. L'import deve corrispondere a una scheda presente in app (attuale o precedenti). Se sostituisci, il CSV deve includere tutte le schede già nello storico.</p>
+    <button type="button" class="pri" onclick="exportWorkoutCsv()">⬇️ Esporta storico CSV</button>
+    <label class="btn" style="margin-top:8px;cursor:pointer">⬆️ Importa CSV
+      <input type="file" accept=".csv,text/csv" style="display:none" onchange="importWorkoutCsvFile(this)">
+    </label>
+  </div>`;
+  if (!list.length) {
+    return tools + `<div class="card"><p class="big">Storico allenamenti</p>
+      <p class="mut">Quando termini un allenamento, qui vedrai ogni esercizio con kg e rip di ogni serie.</p>
     </div>`;
   }
-  return `<h1>Storico</h1>` + list.map(w => {
-    const doneN = (w.exercises || []).filter(e => e.done).length;
-    const tot = (w.exercises || []).length;
-    const lines = (w.exercises || []).filter(e => !e.warm).map(e => {
-      let extra = '';
-      if (e.kg != null || e.reps != null) extra = ` · <b>${e.kg != null ? e.kg + ' kg' : ''}${e.kg != null && e.reps != null ? ' × ' : ''}${e.reps != null ? e.reps : ''}</b>`;
-      return `<div class="hist-ex ${e.done ? 'ok' : ''}"><span>${e.done ? '✓' : '·'} ${esc(e.name)}</span>${extra}</div>`;
+  // migrazione: assegna scheda corrente agli allenamenti senza progId
+  if (S.prog) {
+    ensureProgMeta(S.prog);
+    list.forEach(w => {
+      if (!w.progId) {
+        w.progId = S.prog.id;
+        w.progName = w.progName || S.prog.name;
+      }
+    });
+  }
+  // raggruppa per scheda — titolo = nome file .docx
+  const progsById = {};
+  allKnownProgs().forEach(p => { progsById[p.id] = p; });
+  const groups = new Map();
+  list.forEach(w => {
+    const key = w.progId || w.progName || 'unknown';
+    if (!groups.has(key)) {
+      const p = progsById[w.progId] || (S.prog && S.prog.id === w.progId ? S.prog : null);
+      const fileLabel = p
+        ? displayProgFileName(p)
+        : displayProgFileName({ name: w.progName || w.progFileName || 'Scheda' });
+      groups.set(key, { id: key, name: fileLabel, items: [] });
+    }
+    const g = groups.get(key);
+    // preferisci sempre il nome file dal catalogo/scheda attuale
+    const p = progsById[w.progId] || (S.prog && S.prog.id === w.progId ? S.prog : null);
+    if (p) g.name = displayProgFileName(p);
+    else if (w.progFileName) g.name = displayProgFileName({ fileName: w.progFileName, name: w.progName });
+    g.items.push(w);
+  });
+  // ordine: scheda attuale prima, poi le altre
+  const ordered = [...groups.values()].sort((a, b) => {
+    if (S.prog && a.id === S.prog.id) return -1;
+    if (S.prog && b.id === S.prog.id) return 1;
+    return 0;
+  });
+
+  function renderWorkoutCard(w) {
+    if (entryType(w) === 'rest') {
+      const wdName = w.weekday != null ? WD[w.weekday] : '';
+      return `<div class="card hist-workout hist-rest">
+        <div class="wk-top"><b>${esc(w.date)}</b>
+          <button class="res-btn" onclick="deleteWorkoutLog('${w.id}')">❌</button>
+        </div>
+        <p class="big" style="font-size:18px;margin:6px 0">😴 Riposo</p>
+        <p class="mut">${esc(w.week)}${wdName ? ' · ' + wdName : ''}</p>
+      </div>`;
+    }
+    const exList = (w.exercises || []).filter(e => !e.warm);
+    const doneN = exList.filter(e => e.done || (e.sets && e.sets.some(s => s.done))).length;
+    const tot = exList.length;
+    const blocks = exList.map(e => {
+      let setsHtml = '';
+      if (e.sets && e.sets.length) {
+        setsHtml = `<div class="hist-sets">${e.sets.map((s, si) => formatSetLine(s, si)).join('')}</div>`;
+      } else if (e.kg != null || e.reps != null) {
+        setsHtml = `<div class="hist-sets">${formatSetLine({ n: 1, kg: e.kg, reps: e.reps, done: e.done }, 0)}</div>`;
+      } else if (w.fromPiano) {
+        setsHtml = `<p class="mut hist-nosets">Segnato dal Piano (senza dettaglio serie)</p>`;
+      } else {
+        setsHtml = `<p class="mut hist-nosets">Nessun carico registrato</p>`;
+      }
+      return `<div class="hist-ex-block ${e.done ? 'ok' : ''}">
+        <div class="hist-ex-name">${e.done ? '✓ ' : ''}${esc(e.name)}</div>
+        ${setsHtml}
+      </div>`;
     }).join('');
-    return `<div class="card">
+    const dayLabel = w.day === 'comp' ? 'Complementari' : ('Giorno ' + w.day);
+    return `<div class="card hist-workout">
       <div class="wk-top"><b>${esc(w.date)}</b>
         <button class="res-btn" onclick="deleteWorkoutLog('${w.id}')">❌</button>
       </div>
-      <p class="big" style="font-size:18px;margin:6px 0">${esc(w.week)} · G${w.day}</p>
-      <p class="mut">${esc(w.title)} · ${doneN}/${tot} esercizi</p>
-      <div class="hist-ex-list">${lines}</div>
+      <p class="big" style="font-size:18px;margin:6px 0">${esc(w.week)} · ${esc(dayLabel)}</p>
+      <p class="mut">${esc(w.title || '')}${tot ? ' · ' + doneN + '/' + tot + ' esercizi' : ''}</p>
+      <div class="hist-ex-list">${blocks}</div>
+    </div>`;
+  }
+
+  return tools + `<h1>Storico</h1>` + ordered.map(g => {
+    const isCurrent = S.prog && g.id === S.prog.id;
+    const fileLabel = /\.docx$/i.test(g.name) ? g.name : (g.name + '.docx');
+    return `<div class="hist-prog-section">
+      <h2 class="hist-prog-title">${isCurrent ? '📌' : '📁'} ${esc(fileLabel)}</h2>
+      <p class="mut" style="margin:0 0 10px">${isCurrent ? 'Scheda attuale · ' : ''}${g.items.length} allenament${g.items.length === 1 ? 'o' : 'i'}</p>
+      ${g.items.map(renderWorkoutCard).join('')}
     </div>`;
   }).join('');
 }
@@ -944,32 +2014,80 @@ function resetWk(label, e) {
   e.stopPropagation();
   if (confirm('Attenzione: Vuoi davvero resettare gli allenamenti per la settimana ' + label + '?')) {
     if (confirm('Sei ASSOLUTAMENTE sicuro? Questa operazione non può essere annullata e perderai i progressi della settimana.')) {
-      if (S.done[label]) delete S.done[label];
-      if (S.weekLog && S.weekLog[label]) delete S.weekLog[label];
-      Object.keys(S.chk).forEach(k => { if (k.startsWith(label + '|')) delete S.chk[k] });
+      S.workoutLog = (S.workoutLog || []).filter(w => String(w.week) !== String(label));
+      Object.keys(S.chk || {}).forEach(k => { if (k.startsWith(label + '|')) delete S.chk[k] });
+      Object.keys(S.accLog || {}).forEach(k => { if (k.startsWith(label + '|')) delete S.accLog[k] });
+      rebuildPianoFromStorico();
       save();
       render();
     }
   }
 }
 
-/** Collegamento sicuro bottoni timer (evita problemi onclick HTML su iOS) */
+/** Collegamento sicuro bottoni timer + tap sulle card serie */
 function bindRestButtons() {
   document.querySelectorAll('.rest-start').forEach(btn => {
     btn.onclick = function (ev) {
       ev.preventDefault();
       ev.stopPropagation();
-      const name = btn.getAttribute('data-ex') || '';
-      startRest(name, ev);
+      flushSetInputsFromDOM(); // non perdere kg/rip digitati
+      startRest(btn.getAttribute('data-ex') || '', ev);
     };
   });
   document.querySelectorAll('.rest-set').forEach(btn => {
     btn.onclick = function (ev) {
       ev.preventDefault();
       ev.stopPropagation();
-      const name = btn.getAttribute('data-ex') || '';
-      openRestPicker(name, ev);
+      flushSetInputsFromDOM();
+      openRestPicker(btn.getAttribute('data-ex') || '', ev);
     };
+  });
+  document.querySelectorAll('.set-card').forEach(card => {
+    card.onclick = function (ev) {
+      if (ev.target && (ev.target.tagName === 'INPUT' || ev.target.closest('input'))) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const name = card.getAttribute('data-ex') || '';
+      const week = card.getAttribute('data-week');
+      const day = Number(card.getAttribute('data-day'));
+      const exi = Number(card.getAttribute('data-exi'));
+      const seti = Number(card.getAttribute('data-set'));
+      if (!name || week == null || Number.isNaN(exi) || Number.isNaN(seti)) return;
+
+      // salva prima i valori ancora solo nel DOM
+      flushSetInputsFromDOM();
+
+      const already = card.classList.contains('set-done');
+      if (already) {
+        markSetDone(week, day, exi, seti, false);
+        render();
+        return;
+      }
+      markSetDone(week, day, exi, seti, true);
+      startRest(name, ev);
+    };
+  });
+  document.querySelectorAll('.set-card input').forEach(inp => {
+    inp.addEventListener('click', ev => ev.stopPropagation());
+    inp.addEventListener('focus', ev => ev.stopPropagation());
+    // niente secondo listener input: gli oninput inline bastano e non troncano le cifre
+    inp.addEventListener('blur', function () {
+      const card = inp.closest('.set-card');
+      if (!card) return;
+      const week = card.getAttribute('data-week');
+      const day = Number(card.getAttribute('data-day'));
+      const exi = Number(card.getAttribute('data-exi'));
+      const seti = Number(card.getAttribute('data-set'));
+      if (week == null || Number.isNaN(exi) || Number.isNaN(seti)) return;
+      const inputs = [...card.querySelectorAll('input')];
+      const idx = inputs.indexOf(inp);
+      if (idx === 0) {
+        setExSetLog(week, day, exi, seti, 'kg', inp.value);
+        cascadeKgFromSet(week, day, exi, seti);
+      } else if (idx === 1) {
+        setExSetLog(week, day, exi, seti, 'reps', inp.value);
+      }
+    });
   });
 }
 
@@ -1022,6 +2140,7 @@ function render() {
   setTimeout(() => openDayModal(false), 120);
 })();
 
+rebuildPianoFromStorico();
 render();
 // Espone funzioni usate dagli onclick inline (iOS / strict)
 window.startRest = startRest;
@@ -1033,7 +2152,11 @@ window.setRestPickerPreset = setRestPickerPreset;
 window.confirmRestPicker = confirmRestPicker;
 window.fmtRest = fmtRest;
 window.tg = tg;
-window.setAccLog = setAccLog;
+window.setExSetLog = setExSetLog;
+window.cascadeKgFromSet = cascadeKgFromSet;
+window.markSetDone = markSetDone;
+window.exportWorkoutCsv = exportWorkoutCsv;
+window.importWorkoutCsvFile = importWorkoutCsvFile;
 /* ========== Push Notifications ========== */
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
