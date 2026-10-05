@@ -1596,3 +1596,20 @@ input.kg-suggested {
 .ramp-info b {
   font-weight: 950;
 }
+/* Input di sola lettura (es. ripetizioni fisse in rampa RPE) */
+input.ro-input {
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px dashed var(--mut);
+  color: var(--mut);
+  pointer-events: none;
+}
+
+:root[data-theme="dark"] input.ro-input {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) input.ro-input {
+    background: rgba(255, 255, 255, 0.03);
+  }
+}
