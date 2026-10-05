@@ -443,6 +443,7 @@ function pianoSessionHtml() {
         <div class="ex-head" onclick="tg(${i})" role="button">
           <div class="nm">${esc(e.name)}</div>
           <div class="dt">${fmt(e.text, e.lift)}</div>
+          ${techBadgesHtml(e)}
         </div>
         ${setsBlock}
       </div>
@@ -675,24 +676,254 @@ function setRestSec(name, sec) {
   S.restByEx[liftKey(name)] = n;
   save();
 }
+/* ===== Varianti PL: riconoscimento dal testo della scheda ===== */
+// Tabella RPE (Tuchscherer): ripetizioni massime → % del 1RM
+const RPE_PCT = [null, 100, 95.5, 92.2, 89.2, 86.3, 83.7, 81.1, 78.6, 76.2, 73.9, 70.7, 68];
+function rpePct(effReps) {
+  const n = Math.max(1, Math.min(12, effReps));
+  const a = Math.floor(n), b = Math.ceil(n);
+  return a === b ? RPE_PCT[a] : RPE_PCT[a] + (RPE_PCT[b] - RPE_PCT[a]) * (n - a);
+}
+const roundKg = x => Math.round(x / 2.5) * 2.5;
+const _techCache = {};
+function analyzeEx(e) {
+  const t = (String((e && e.name) || '') + ' ' + String((e && e.text) || '')).toLowerCase().replace(/\s+/g, ' ');
+  if (_techCache[t]) return _techCache[t];
+  const N = '(\\d+(?:[.,]\\d+)?)', RG = '(?:\\s*[-–\\/]\\s*' + N + ')?';
+  const f = x => parseFloat(String(x).replace(',', '.'));
+  const T = { tags: [], rpe: null, mode: 'fixed', dynamic: false };
+  const tag = (k, label, tip) => T.tags.push({ k, label, tip });
+  // RIR: "RIR 2", "2 RIR", "@2RIR", "2-3 RIR", "2 rip in riserva"
+  let m = t.match(new RegExp('\\brir\\s*[:=]?\\s*' + N + RG)) || t.match(new RegExp(N + RG + '\\s*rir\\b')) || t.match(new RegExp('(\\d+)()\\s*(?:rip|reps?|ripetizioni)\\s*(?:in|di)\\s*riserva'));
+  if (m) {
+    const a = f(m[1]), b = m[2] != null && m[2] !== '' ? f(m[2]) : a;
+    const lo = 10 - Math.max(a, b), hi = 10 - Math.min(a, b);
+    if (lo >= 4 && hi <= 10) T.rpe = { lo, hi, mid: (lo + hi) / 2, src: 'rir', txt: 'RIR ' + (a === b ? a : Math.min(a, b) + '-' + Math.max(a, b)) };
+  }
+  // RPE: "@7", "@ 8.5", "rpe 8", "rpe8", "@7-8", "RPE 7/8", "a rpe 9"
+  if (!T.rpe) {
+    m = t.match(new RegExp('(?:rpe\\s*[:=]?|@)\\s*' + N + RG + '(?![\\d.,]|\\s*%)')) ||
+      t.match(new RegExp(N + RG + '\\s*(?:@\\s*)?rpe\\b'));
+    if (m) {
+      const a = f(m[1]), b = m[2] != null && m[2] !== '' ? f(m[2]) : a;
+      const lo = Math.min(a, b), hi = Math.max(a, b);
+      if (lo >= 4 && hi <= 10) T.rpe = { lo, hi, mid: (lo + hi) / 2, src: 'rpe', txt: 'RPE ' + (lo === hi ? lo : lo + '-' + hi) };
+    }
+  }
+  const has = r => r.test(t);
+  // Autoregolazione / metodi di carico: accetta abbreviazioni, italiano/inglese e scritture comuni.
+  T.mav = has(/\bm\.?a\.?v\.?\b|maximum\s*acceptable\s*volume|volume\s*massimo\s*accettabile/);
+  T.vbt = has(/\bv\.?b\.?t\.?\b|velocity[ -]?based|speed\s*(?:based|work)|velocit[aà]|\bm\/s\b|\bmetri\/secondo\b/);
+  T.e1rm = has(/\be\.?1\.?rm\b|1\s*rm\s*stimato|massimale\s*stimato|estimated\s*1\s*rm/);
+  T.instinct = has(/istintiv|a sensazione|\bfeeling\b|autoregol|a piacere|a piacimento|\binstinctive\b|carico\s*libero|ripetizioni\s*libere/);
+  T.amrap = has(/\bamrap\b|as\s*many\s*reps|\bmax(?:imum)?\s*reps?\b|massime?\s*ripetizioni|al cedimento|to failure|a cedimento/);
+  T.emom = has(/\bemom\b|every minute|ogni minuto/);
+  const cl = t.match(/(\d+(?:\s*\+\s*\d+)+)/);
+  T.cluster = has(/\bcluster\b/) || !!cl;
+  if (cl) T.clusterParts = cl[1].split(/\s*\+\s*/).map(Number);
+  T.restpause = has(/rest[\s-]*pause|\brp\b|myo[\s-]*reps?/);
+  T.drop = has(/drop[\s-]*set|\bdrop\b|serie a scalare/);
+  T.topset = has(/top[\s-]*set|serie top/);
+  T.backoff = has(/back[\s-]*off|\bbo\b|serie di scarico/);
+  if (T.backoff) { const bp = t.match(/(?:-|meno\s*)\s*(\d+(?:[.,]\d+)?)\s*%/); if (bp) T.backoffPct = f(bp[1]); }
+  T.ramping = has(/ramping|\brampa\b|avvicinamento|salita\s*progressiva|progressive\s*loading/);
+  T.wave = has(/\bwave\b|\bonda\b|a onde|ondulat|wave\s*loading/);
+  T.dailyMax = has(/(?:singola|doppia|tripla)\s*(?:di|del)\s*(?:giornata|giorno)|daily max|max del giorno|massimale del giorno|heavy single|single of the day/);
+  T.me = has(/\bme day\b|max effort|massimo sforzo|coniugat|conjugate/);
+  T.de = has(/dynamic effort|\bde day\b|speed work|esplosiv/);
+  T.chains = has(/catene|\bchains?\b/);
+  T.bands = has(/elastic|\bbands?\b|banded|reverse[\s-]*band|\breverse\s*elastic/);
+  T.reverseBand = has(/reverse[\s-]*band|reverse\s*banded/);
+  T.sling = has(/sling[\s-]*shot/);
+  T.board = has(/\bboards?\b|\bpins?\b|\bfermi\b|\bbox\b/);
+  const tp = t.match(/tempo\s*:?\s*(\d(?:[-.\/]\d){2,3}|\d{4})/);
+  T.tempo = tp ? tp[1].replace(/\s+/g, '') : (has(/\btempo\b|eccentric|negativ/) ? '' : null);
+  T.pause = has(/pausat|paused|\bpause\s*(?:squat|bench|deadlift|rep)|(?:squat|panca|stacco)\s*(?:con\s*)?pausa|\bpausa\s*(?:di\s*)?\d+\s*(?:s|sec)\b|\bfermo\s*\d/);
+  T.deficit = has(/deficit/);
+  T.rom = has(/rom ridott|\brom\b|parzial|partial/);
+  T.dup = has(/\bdup\b|daily\s*undulating|ondulat[ao]\s*(?:giornaliera|quotidiana)/);
+  T.block = has(/periodizzazion[ei]\s*a\s*blocchi|\ba\s*blocchi\b|block\s*periodization|block\s*periodised/);
+  T.linear = has(/periodizzazion[ei]\s*lineare|\blineare\b|linear\s*periodization|linear\s*periodised/);
+  const em = t.match(/emom\s*(\d+)|(\d+)\s*(?:min|')\s*emom/);
+  if (em) T.emomMin = parseInt(em[1] || em[2], 10);
+  // etichette
+  if (T.rpe) tag('rpe', T.rpe.txt, 'Autoregolazione: scegli il carico che dia questa fatica (RPE 10 = zero rip di riserva). Aggiungi serie finché lo raggiungi.');
+  if (T.mav) tag('mav', 'MAV', 'Carico da trovare in rampa: aggiungi serie finché arrivi al carico giusto per la variante.');
+  if (T.vbt) tag('vbt', 'VBT', 'Carico guidato dalla velocità del bilanciere.');
+  if (T.e1rm) tag('e1rm', 'e1RM', 'Massimale stimato dalla serie (kg × rip × RPE).');
+  if (T.instinct) tag('inst', 'Istintivo', 'Kg e rip liberi: scegli a sensazione.');
+  if (T.topset) tag('top', 'Top set', 'Serie più pesante della giornata.');
+  if (T.backoff) tag('bo', 'Back-off' + (T.backoffPct ? ' −' + T.backoffPct + '%' : ''), 'Serie di volume con carico ridotto dopo il top set.');
+  if (T.ramping) tag('ramp', 'Rampa', 'Serie di avvicinamento progressive.');
+  if (T.dailyMax) tag('dm', 'Max del giorno', 'Trova la singola/doppia/tripla più pesante della giornata.');
+  if (T.amrap) tag('amrap', 'AMRAP', 'Più ripetizioni possibili con tecnica pulita.');
+  if (T.emom) tag('emom', 'EMOM' + (T.emomMin ? ' ' + T.emomMin + "'" : ''), 'Una serie all\'inizio di ogni minuto.');
+  if (T.cluster) tag('cl', 'Cluster' + (T.clusterParts ? ' ' + T.clusterParts.join('+') : ''), 'Serie spezzata in mini-blocchi con pause brevi.');
+  if (T.restpause) tag('rp', 'Rest-pause', 'Serie al cedimento, pausa breve, altre ripetizioni (aggiungi mini-serie).');
+  if (T.drop) tag('drop', 'Drop set', 'Riduci il carico e continua senza recupero (aggiungi serie).');
+  if (T.wave) tag('wave', 'Wave', 'Carico a onde: serie progressive che si ripetono.');
+  if (T.me) tag('me', 'Max effort', 'Conjugate: trova il massimale della variante.');
+  if (T.de) tag('de', 'Dynamic effort', 'Carichi leggeri alla massima velocità.');
+  if (T.chains) tag('ch', 'Catene', 'Il carico cresce salendo.');
+  if (T.bands) tag('bd', T.reverseBand ? 'Reverse Band' : 'Elastici / Banded', 'Resistenza elastica: il carico cambia durante il movimento.');
+  if (T.sling) tag('sl', 'Slingshot', 'Supporto che aiuta nel fondo della panca.');
+  if (T.board) tag('bp', 'Board/Pin', 'ROM ridotto con board o fermi.');
+  if (T.tempo != null) tag('tp', 'Tempo' + (T.tempo ? ' ' + T.tempo : ''), 'Cadenza controllata (discesa-pausa-salita-pausa).');
+  if (T.pause) tag('pz', 'Pausa', 'Pausa ferma sul petto/fondo prima di risalire.');
+  if (T.deficit) tag('df', 'Deficit', 'Parti da una posizione più bassa.');
+  if (T.rom) tag('rom', 'ROM ridotto', 'Range di movimento ridotto.');
+  if (T.dup) tag('dup', 'DUP', 'Periodizzazione ondulata giornaliera.');
+  if (T.block) tag('block', 'A blocchi', 'Periodizzazione che concentra volume e intensità in blocchi successivi.');
+  if (T.linear) tag('linear', 'Lineare', 'Progressione graduale del carico e/o riduzione del volume.');
+  const ramp = !!(T.rpe || T.mav || T.vbt || T.e1rm || T.topset || T.ramping || T.dailyMax || T.me);
+  T.mode = ramp ? 'ramp' : (T.instinct ? 'free' : 'fixed');
+  T.dynamic = ramp || T.restpause || T.drop || T.amrap || T.backoff;
+  return (_techCache[t] = T);
+}
+/** toglie dal testo RPE/RIR/%/tempo che altrimenti verrebbero scambiati per serie (es. "@7-8", "tempo 3-1-0") */
+function stripNoise(text) {
+  const N = '\\d+(?:[.,]\\d+)?', RG = '(?:\\s*[-–\\/]\\s*' + N + ')?';
+  return String(text || '')
+    .replace(new RegExp('\\brir\\s*[:=]?\\s*' + N + RG, 'gi'), ' ')
+    .replace(new RegExp('@?\\s*' + N + RG + '\\s*rir\\b', 'gi'), ' ')
+    .replace(new RegExp('(?:rpe|@)\\s*' + N + RG + '(?:\\s*%)?', 'gi'), ' ')
+    .replace(new RegExp('(' + N + ')(' + RG + ')\\s*%', 'g'), (m, a, r, off, str) => (r && /[x×]\s*$/.test(str.slice(0, off))) ? a + ' ' : ' ')
+    .replace(/tempo\s*:?\s*(?:\d(?:[-.\/]\d){2,3}|\d{4})/gi, ' ')
+    .replace(new RegExp(N + '\\s*m\\/s', 'gi'), ' ');
+}
+/** kg stimati per RPE/RIR dal massimale (solo se c'è il massimale del fondamentale) */
+function rpeTargetKg(tech, reps, lift) {
+  if (!tech.rpe || !lift || !S.max || !S.max[lift]) return null;
+  const r = Math.max(1, reps || 1);
+  return roundKg(S.max[lift] * rpePct(r + (10 - tech.rpe.mid)) / 100);
+}
+function e1rmFromSets(sets) {
+  let best = null;
+  (sets || []).forEach(s => {
+    const kg = parseFloat(String(s.kg).replace(',', '.')), r = parseInt(s.reps, 10), rp = parseFloat(String(s.rpe).replace(',', '.'));
+    if (!(kg > 0) || !(r > 0) || !(rp >= 4 && rp <= 10)) return;
+    const v = kg / rpePct(r + (10 - rp)) * 100;
+    if (best == null || v > best) best = v;
+  });
+  return best == null ? null : Math.round(best * 2) / 2;
+}
+function rpeOf(s) {
+  const v = parseFloat(String((s && s.rpe) == null ? '' : s.rpe).replace(',', '.'));
+  return isNaN(v) ? null : v;
+}
+function techBadgesHtml(e) {
+  if (!e || e.warm) return '';
+  const T = analyzeEx(e);
+  if (!T.tags.length) return '';
+  const primaryKeys = ['rpe','mav','vbt','inst','e1rm','amrap','emom','cl','rp','top','bo','wave','ramp','dm','me','de'];
+  const primary = T.tags.find(t => primaryKeys.includes(t.k)) || T.tags[0];
+  const rest = T.tags.filter(t => t !== primary);
+  const modeText = T.mode === 'free' ? 'SERIE LIBERA' : T.mode === 'ramp' ? 'SERIE AUTOREGOLATA' : 'VARIANTE TECNICA';
+  return `<div class="variant-panel">
+    <div class="variant-main tc-${primary.k}">
+      <span class="variant-mode">${modeText}</span>
+      <strong>${esc(primary.label)}</strong>
+      <span class="variant-help">${esc(primary.tip)}</span>
+    </div>
+    ${rest.length ? `<div class="tech-badges">${rest.map(t => `<span class="tech-chip tc-${t.k}" title="${esc(t.tip)}">${esc(t.label)}</span>`).join('')}</div>` : ''}
+  </div>`;
+}
+/** segnaposto kg per la serie si: rampa verso il carico target */
+function rampPlaceholder(T, info, log, si, est) {
+  const role = info.roles && info.roles[si];
+  const prevKgs = log.sets.slice(0, si).map(s => parseFloat(String(s.kg).replace(',', '.'))).filter(v => v > 0);
+  const last = prevKgs.length ? prevKgs[prevKgs.length - 1] : null;
+  if (role === 'backoff' && T.backoffPct) {
+    const tops = log.sets.filter((s, i) => (info.roles || [])[i] === 'top').map(s => parseFloat(String(s.kg).replace(',', '.'))).filter(v => v > 0);
+    if (tops.length) return String(roundKg(Math.max(...tops) * (1 - T.backoffPct / 100)));
+  }
+  if (last != null) {
+    if (role === 'backoff') return String(last);
+    if (est != null && est - last > 0) return String(est - last <= 10 ? est : last + 10);
+    return String(last + 5);
+  }
+  if (est != null) return String((info.roles ? info.roles.filter(r => r === 'top').length : info.count) > 1 ? est : roundKg(est * 0.95));
+  return 'kg';
+}
+function rampHeaderHtml(T, info, log, est, lift) {
+  const bits = [];
+  if (T.rpe) {
+    const reps = info.reps != null ? info.reps : (info.targets && info.targets[0]) || 1;
+    const nTop = info.roles ? info.roles.filter(r => r === 'top').length : info.count;
+    bits.push(`Target <b>${esc(T.rpe.txt)}</b>${nTop ? ' · ' + nTop + '×' + reps : ''}` + (est != null ? ` ≈ <b>${String(est).replace('.', ',')} kg</b> (stima dal massimale ${S.max[lift]} kg)` : ''));
+    const hit = log.sets.some(s => { const r = rpeOf(s); return r != null && r >= T.rpe.lo; });
+    if (hit) bits.push('✓ RPE raggiunto: puoi fermarti');
+    else bits.push('Aggiungi una serie alla volta finché raggiungi il target');
+  } else {
+    bits.push('Aggiungi serie fino al carico giusto per la variante');
+  }
+  const e1 = e1rmFromSets(log.sets);
+  if (e1 != null) bits.push(`e1RM stimato ≈ <b>${String(e1).replace('.', ',')} kg</b>`);
+  return `<p class="ramp-info">${bits.join('<br>')}</p>`;
+}
+function addRampSet(week, day, i) {
+  try { flushSetInputsFromDOM(); } catch (e) {}
+  const row = getExLog(week, day, i);
+  row.dyn = true;
+  row.sets.push({ kg: '', reps: '', rpe: '', done: false });
+  const k = week + '|' + day, a = S.chk[k];
+  if (a && a.indexOf(i) >= 0) a.splice(a.indexOf(i), 1);
+  save(); render();
+}
+function removeLastSet(week, day, i) {
+  try { flushSetInputsFromDOM(); } catch (e) {}
+  const row = getExLog(week, day, i);
+  if (row.sets.length > 1) row.sets.pop();
+  syncExerciseDoneFromSets(week, day, i);
+  save(); render();
+}
+
 /** Quante serie ha l'esercizio (dal testo scheda) */
 function parseSets(text) {
-  const t = String(text || '');
+  const raw = String(text || '');
+  const T = analyzeEx({ name: '', text: raw });
+  const t = stripNoise(raw);
+  let m;
+  // EMOM N minuti → N serie
+  if (T.emom && T.emomMin) {
+    const r = t.match(/(\d+)\s*(?:rip|reps?)\b/i);
+    return { count: Math.min(T.emomMin, 30), targets: null, reps: r ? parseInt(r[1], 10) : undefined };
+  }
+  // cluster: 3x(2+2+1) → 3 serie da 5 rip totali
+  m = t.match(/(\d+)\s*[x×]\s*\(?\s*(\d+(?:\s*\+\s*\d+)+)\s*\)?/i);
+  if (m) {
+    const parts = m[2].split(/\s*\+\s*/).map(Number);
+    return { count: parseInt(m[1], 10) || 3, targets: null, reps: parts.reduce((a, b) => a + b, 0), cluster: parts.join('+') };
+  }
+  // top set + back-off: "1x3 ... 3x5"
+  if (T.topset && T.backoff) {
+    const all = [...t.matchAll(/(\d+)\s*[x×]\s*(\d+)/g)];
+    if (all.length >= 2) {
+      const a = parseInt(all[0][1], 10) || 1, b = parseInt(all[1][1], 10) || 3;
+      return {
+        count: a + b,
+        targets: [...Array(a).fill(parseInt(all[0][2], 10)), ...Array(b).fill(parseInt(all[1][2], 10))],
+        roles: [...Array(a).fill('top'), ...Array(b).fill('backoff')]
+      };
+    }
+  }
   // 10-8-6-4 o 5-5-5
   const seq = t.match(/\b(\d+(?:\s*-\s*\d+){1,})\b/);
   if (seq) {
     const parts = seq[1].split(/\s*-\s*/).map(n => parseInt(n, 10)).filter(n => n > 0);
     if (parts.length >= 2) return { count: parts.length, targets: parts };
   }
-  // 3x8 / 3×8 / 5x3s → serie x rip
-  let m = t.match(/(\d+)\s*[x×]\s*(\d+)\s*s\b/i);
+  // 5x3s → serie x rip
+  m = t.match(/(\d+)\s*[x×]\s*(\d+)\s*s\b/i);
   if (m) return { count: parseInt(m[2], 10) || 3, targets: null, reps: parseInt(m[1], 10) };
   m = t.match(/(\d+)\s*[x×]\s*(\d+)/i);
   if (m) return { count: parseInt(m[1], 10) || 3, targets: null, reps: parseInt(m[2], 10) };
-  // "3 serie" / "4 sets"
   m = t.match(/(\d+)\s*(?:serie|sets?)\b/i);
   if (m) return { count: parseInt(m[1], 10) || 3, targets: null };
-  return { count: 3, targets: null };
+  // singola / doppia / tripla
+  m = t.match(/\b(singola|doppia|tripla)\b/i);
+  if (m) return { count: 1, targets: null, reps: { singola: 1, doppia: 2, tripla: 3 }[m[1].toLowerCase()] };
+  return { count: T.mode === 'ramp' ? 1 : 3, targets: null };
 }
 function prescribedKg(text, lift) {
   if (!lift || !S.max || !S.max[lift]) return null;
@@ -718,7 +949,7 @@ function getExLog(week, day, i, setCount) {
   }
   const n = Math.max(1, setCount || row.sets.length || 3);
   while (row.sets.length < n) row.sets.push({ kg: '', reps: '', done: false });
-  if (row.sets.length > n) row.sets.length = n;
+  if (row.sets.length > n && !row.dyn) row.sets.length = n;
   row.sets.forEach(s => { if (s.done == null) s.done = false; });
   return row;
 }
@@ -862,6 +1093,8 @@ function flushSetInputsFromDOM() {
         if (row.sets[seti].kg !== val) { row.sets[seti].kg = val; dirty = true; }
       } else if (n === 1) {
         if (row.sets[seti].reps !== val) { row.sets[seti].reps = val; dirty = true; }
+      } else if (n === 2) {
+        if (row.sets[seti].rpe !== val) { row.sets[seti].rpe = val; dirty = true; }
       }
       n++;
     });
@@ -1065,9 +1298,10 @@ function saveSessionLogs(week, day, exercises) {
         else if (/stacco|deadlift|sumo|regular/.test(n)) lift = 'd';
       }
       const kg = prescribedKg(e.text, lift);
+      const autoM = analyzeEx(e).mode !== 'fixed';
       const sets = log.sets.map((s, si) => ({
-        kg: kg != null ? kg : s.kg,
-        reps: (info.targets ? info.targets[si] : info.reps) != null ? (info.targets ? info.targets[si] : info.reps) : s.reps,
+        kg: (autoM && s.kg !== '' && s.kg != null) ? s.kg : (kg != null ? kg : s.kg),
+        reps: (autoM && s.reps !== '' && s.reps != null) ? s.reps : ((info.targets ? info.targets[si] : info.reps) != null ? (info.targets ? info.targets[si] : info.reps) : s.reps),
         done: s.done,
       }));
       pushLiftHistory(e.name, sets, week, day);
@@ -1080,11 +1314,13 @@ function saveSessionLogs(week, day, exercises) {
 /** HTML card per ogni serie */
 function setsLogHtml(weekLabel, day, exIndex, exercise) {
   const info = parseSets(exercise.text);
+  const T = analyzeEx(exercise);
   // complementari: pesca kg/rip dalla stessa giornata della settimana precedente
   const prevInfo = (!exercise.warm && !isMainLift(exercise))
     ? prefillAccessoryFromPrev(weekLabel, day, exIndex, exercise)
     : null;
   const log = getExLog(weekLabel, day, exIndex, info.count);
+  if (T.dynamic) log.dyn = true;
   // per fondamentali usa sempre il lift taggato o ricavato
   let lift = exercise.lift;
   if (!lift && isMainLift(exercise)) {
@@ -1093,21 +1329,25 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
     else if (/panca|bench/.test(n)) lift = 'b';
     else if (/stacco|deadlift|sumo|regular/.test(n)) lift = 'd';
   }
-  const sugKg = prescribedKg(exercise.text, lift);
+  const sugKg = (T.backoffPct || T.mav) ? null : prescribedKg(exercise.text, lift);
+  const est = sugKg != null ? sugKg : rpeTargetKg(T, info.reps != null ? info.reps : (info.targets && info.targets[0]), lift);
   const main = isMainLift(exercise);
-  const hasRpe = /\brpe\b/i.test(String(exercise.text || ''));
+  const hasRpe = T.mode === 'ramp';
   // fondamentali: di default bloccati; se c'è RPE → kg modificabile, rip no
-  const kgEditable = !main || hasRpe;
-  const repsEditable = !main;
-  const fullyLocked = main && !hasRpe;
+  const repsEditable = !main || T.mode === 'free';
+  const fullyLocked = main && T.mode === 'fixed';
   const wJs = JSON.stringify(weekLabel);
   const restSec = getRestSec(exercise.name);
   const mono = !main && isMonolateral(exercise);
   // assicura struttura L/R per mono
   if (mono) log.sets.forEach(st => ensureMonoSides(st));
   return `<div class="sets-wrap ${fullyLocked ? 'sets-locked' : ''} ${mono ? 'sets-mono' : ''}">
+    ${T.mode === 'ramp' ? rampHeaderHtml(T, info, log, est, lift) : (T.mode === 'free' ? '<p class="ramp-info">Istintivo: kg e rip liberi, scegli a sensazione</p>' : '')}
     ${log.sets.map((s, si) => {
       const target = info.targets ? info.targets[si] : info.reps;
+      const roleLbl = (info.roles && info.roles[si] === 'top' ? ' · Top set' : info.roles && info.roles[si] === 'backoff' ? ' · Back-off' : '')
+        + (T.mode === 'ramp' && !info.roles && si >= info.count ? ' · extra' : '')
+        + (T.mode === 'ramp' && T.rpe && rpeOf(s) != null && rpeOf(s) >= T.rpe.lo ? ' · target ✓' : '');
       const isDone = !!s.done;
       const prescRep = target != null ? target : null;
       const prescKg = sugKg != null ? sugKg : null;
@@ -1164,7 +1404,7 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
         inputs = `<div class="set-readonly set-done-ro">
              <span class="set-ro-kg">${esc(kgShow)}</span>
              <span class="set-x">×</span>
-             <span class="set-ro-reps">${esc(repShow)}</span>
+             <span class="set-ro-reps">${esc(repShow + (rpeOf(s) != null ? ' @' + String(rpeOf(s)).replace('.', ',') : ''))}</span>
            </div>
            <p class="set-lock-hint">Serie fatta · tocca la card per sbloccare</p>`;
       } else if (fullyLocked) {
@@ -1176,20 +1416,23 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
              <span class="set-ro-reps">${esc(repLabel)}</span>
            </div>
            <p class="set-lock-hint">Fisso dalla scheda (fondamentale)</p>`;
-      } else if (main && hasRpe) {
-        // kg editabile, rip fisse
-        const repLabel = prescRep != null ? String(prescRep) + ' rip' : '— rip';
-        const fromPrev = prevSetKg(log, si);
+      } else if (T.mode === 'ramp') {
         const kgVal = s.kg != null && s.kg !== '' ? esc(String(s.kg)) : '';
-        const kgPh = fromPrev ? String(fromPrev) : (prescKg != null ? String(prescKg) : 'kg');
-        inputs = `<div class="set-inputs set-rpe">
-             <input type="number" inputmode="decimal" step="0.5" placeholder="${esc(kgPh)}" value="${kgVal}"
+        const repVal = s.reps != null && s.reps !== '' ? esc(String(s.reps)) : '';
+        const rpeVal = s.rpe != null && s.rpe !== '' ? esc(String(s.rpe)) : '';
+        const ph = rampPlaceholder(T, info, log, si, est);
+        inputs = `<div class="set-inputs set-ramp">
+             <input type="number" inputmode="decimal" step="0.5" placeholder="${esc(ph)}" value="${kgVal}"
                oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)"
                onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
              <span class="set-x">×</span>
-             <span class="set-ro-reps set-ro-inline">${esc(repLabel)}</span>
+             <input type="number" inputmode="numeric" step="1" placeholder="${prescRep != null ? prescRep : 'rip'}" value="${repVal}"
+               oninput="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)">
+             <span class="set-at">@</span>
+             <input type="number" inputmode="decimal" step="0.5" min="1" max="10" placeholder="${T.rpe ? esc(String(T.rpe.hi)) : 'RPE'}" value="${rpeVal}"
+               oninput="setExSetLog(${wJs},${day},${exIndex},${si},'rpe',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'rpe',this.value)">
            </div>
-           <p class="set-lock-hint">RPE · puoi impostare i kg · rip fisse</p>`;
+           <p class="set-lock-hint">kg × rip @ RPE sentito · tocca la card quando hai finito</p>`;
       } else {
         const pSet = prevInfo && prevInfo.sets ? (prevInfo.sets[si] || prevInfo.sets[prevInfo.sets.length - 1]) : null;
         const prevHint = pSet && ((pSet.kg !== '' && pSet.kg != null) || (pSet.reps !== '' && pSet.reps != null))
@@ -1219,12 +1462,13 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
         role="button"
         title="${isDone ? 'Serie fatta · tocca per annullare' : 'Tocca: segna fatta + recupero ' + fmtRest(restSec)}">
         <div class="set-label">
-          <span class="set-title">${isDone ? '✓ ' : ''}Serie ${si + 1}${target != null && repsEditable ? ' · obiettivo ' + target + ' rip' : ''}</span>
+          <span class="set-title">${isDone ? '✓ ' : ''}Serie ${si + 1}${roleLbl}${target != null && repsEditable ? ' · obiettivo ' + target + ' rip' : ''}</span>
           <span class="set-rest-hint">${isDone ? 'fatta' : fmtRest(restSec)}</span>
         </div>
         ${inputs}
       </div>`;
     }).join('')}
+    ${T.dynamic && !mono ? `<div class="ramp-actions"><button type="button" onclick='addRampSet(${wJs},${day},${exIndex})'>＋ Aggiungi serie</button>${log.sets.length > 1 ? `<button type="button" onclick='removeLastSet(${wJs},${day},${exIndex})'>− Togli ultima</button>` : ''}</div>` : ''}
   </div>`;
 }
 /** secondi → "HH:MM:SS" per input type=time */
@@ -1519,7 +1763,7 @@ function V(v) {
 }
 function fmt(text, lift) {
   const mav = /mav/i.test(text);
-  return esc(text).replace(/(\d+)\s*x\s*(\d+)\s*s\b|(\d+(?:[.,]\d+)?)\s*%(\s+del\s+\S+)?|@(\d+(?:[.,]\d+)?)| (\d+(?:-\d+){2,})\b/gi, (m, a, b, p, rel, r, seq) => {
+  return esc(text).replace(/(\d+)\s*x\s*(\d+)\s*s\b|(\d+(?:[.,]\d+)?)\s*%(\s+del\s+\S+)?|@(\d+(?:[.,]\d+)?(?:\s*[-–]\s*\d+(?:[.,]\d+)?)?)| (\d+(?:-\d+){2,})\b/gi, (m, a, b, p, rel, r, seq, off, str) => {
     if (a) return `<span class="sr"><span class="n-serie">${b}</span> serie × <span class="n-rip">${a}</span> rip</span>`;
     if (p) {
       if (rel || mav || !lift) return `<span class="rel">${p}%${rel || ''} non del massimale</span>`;
@@ -1527,6 +1771,7 @@ function fmt(text, lift) {
       return `${p}% <span class="kg">${String(kg).replace('.', ',')} kg</span>`
     }
     if (r) return `<span class="rpe">RPE ${r}</span>`;
+    if (seq && /tempo\s*:?\s*$/i.test(str.slice(0, off))) return m;
     if (seq) return `<span class="seq">${seq.split('-').length} serie: ${seq.split('-').join(' · ')} rip</span>`;
     return m
   });
@@ -1721,8 +1966,10 @@ function logFinishedWorkout(weekLabel, day, weekdayOverride) {
   if (S.prog) { ensureProgMeta(S.prog); archiveProg(S.prog); }
   const wd = weekdayOverride != null ? Number(weekdayOverride) : weekdayMon0();
   // sostituisci eventuale segno piano / vecchio log stesso giorno
+  const _keepAcc = S.accLog && S.accLog[k] ? JSON.parse(JSON.stringify(S.accLog[k])) : null;
   removeWorkoutLogByWeekDay(weekLabel, day, S.prog && S.prog.id);
   removeStoricoByWeekWeekday(weekLabel, wd, S.prog && S.prog.id);
+  if (_keepAcc) { S.accLog = S.accLog || {}; S.accLog[k] = _keepAcc; }
   const entry = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
     type: 'train',
@@ -1748,7 +1995,7 @@ function logFinishedWorkout(weekLabel, day, weekdayOverride) {
           else if (/stacco|deadlift|sumo|regular/.test(n)) lift = 'd';
         }
         const prescKg = isMainLift(e) ? prescribedKg(e.text, lift) : null;
-        const hasRpe = /\brpe\b/i.test(String(e.text || ''));
+        const hasRpe = analyzeEx(e).mode !== 'fixed';
         sets = (log.sets || []).map((s, si) => {
           const targetRep = info.targets ? info.targets[si] : info.reps;
           let kgN = null, repsN = null;
@@ -1761,6 +2008,7 @@ function logFinishedWorkout(weekLabel, day, weekdayOverride) {
               kgN = prescKg;
             }
             repsN = targetRep != null ? Number(targetRep) : null;
+            if (hasRpe && s.reps !== '' && s.reps != null && !isNaN(parseInt(s.reps, 10))) repsN = parseInt(s.reps, 10);
           } else if (s.L || s.R) {
             ensureMonoSides(s);
             const parseSide = (sd) => {
@@ -1794,6 +2042,7 @@ function logFinishedWorkout(weekLabel, day, weekdayOverride) {
             kg: kgN,
             reps: repsN,
             done: !!s.done,
+            ...(rpeOf(s) != null ? { rpe: rpeOf(s) } : {}),
           };
         });
       }
@@ -2002,6 +2251,7 @@ function renderTrainSession(week, day) {
         <div class="ex-head" onclick="tg(${i})" role="button">
           <div class="nm">${esc(e.name)}</div>
           <div class="dt">${fmt(e.text, e.lift)}</div>
+          ${techBadgesHtml(e)}
         </div>
         ${setsBlock}
         ${timerBtn}
@@ -2318,7 +2568,7 @@ function formatSetLine(s, idx) {
   const kg = s.kg != null && s.kg !== '' ? String(s.kg).replace('.', ',') + ' kg' : '— kg';
   const reps = s.reps != null && s.reps !== '' ? String(s.reps) + ' rip' : '— rip';
   const mark = s.done ? '✓' : '·';
-  return `<div class="hist-set ${s.done ? 'done' : ''}"><span class="hist-set-n">${mark} Serie ${n}</span><span class="hist-set-val">${esc(kg)} × ${esc(reps)}</span></div>`;
+  return `<div class="hist-set ${s.done ? 'done' : ''}"><span class="hist-set-n">${mark} Serie ${n}</span><span class="hist-set-val">${esc(kg)} × ${esc(reps)}${s.rpe != null && s.rpe !== '' ? ' @' + esc(String(s.rpe).replace('.', ',')) : ''}</span></div>`;
 }
 function storico() {
   const list = S.workoutLog || [];
@@ -2610,6 +2860,8 @@ function bindRestButtons() {
         cascadeKgFromSet(week, day, exi, seti);
       } else if (idx === 1) {
         setExSetLog(week, day, exi, seti, 'reps', inp.value);
+      } else if (idx === 2) {
+        setExSetLog(week, day, exi, seti, 'rpe', inp.value);
       }
     });
   });

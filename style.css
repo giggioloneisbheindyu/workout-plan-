@@ -1422,3 +1422,177 @@ input.kg-suggested {
 .comp-table input { padding: 10px 6px; font-size: 15px; }
 .comp-table .comp-del { width: 100%; padding: 8px 0; margin: 0; }
 .comp-sel { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--bd); background: var(--pill); color: var(--tx); font: inherit; margin: 4px 0 8px; box-sizing: border-box; }
+/* ===== Varianti PL: etichette, rampa RPE ===== */
+.tech-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.tech-chip { font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 999px; background: var(--pill); border: 1px solid var(--bd); color: var(--tx); letter-spacing: 0.02em; }
+.tech-chip.tc-rpe, .tech-chip.tc-mav, .tech-chip.tc-vbt, .tech-chip.tc-e1rm, .tech-chip.tc-top, .tech-chip.tc-dm, .tech-chip.tc-me { border-color: var(--ac, #3e8bff); color: var(--ac, #3e8bff); }
+.tech-chip.tc-inst { border-color: #30a46c; color: #30a46c; }
+.ramp-info { font-size: 13px; line-height: 1.45; margin: 0 0 8px; padding: 8px 12px; border-radius: 12px; background: var(--pill); border: 1px dashed var(--bd); color: var(--mut); }
+.ramp-info b { color: var(--tx); }
+.set-ramp { gap: 6px; }
+.set-ramp input:last-of-type { flex: 0.8; }
+.set-at { font-weight: 800; color: var(--mut); flex: none; }
+.ramp-actions { display: flex; gap: 8px; margin-top: 8px; }
+.ramp-actions button { flex: 1; margin: 0; }
+
+/* ===== Varianti PL: gerarchia visiva + leggibilità dislessia ===== */
+.variant-panel {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.variant-main {
+  border: 2px solid var(--bd);
+  border-radius: 14px;
+  padding: 12px 13px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  align-items: center;
+  background: var(--pill);
+}
+.variant-main strong {
+  font-size: 18px;
+  line-height: 1.2;
+  letter-spacing: .01em;
+}
+.variant-mode {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+  color: var(--mut);
+}
+.variant-help {
+  grid-column: 1 / -1;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--mut);
+}
+.variant-main.tc-rpe,
+.variant-main.tc-mav,
+.variant-main.tc-vbt,
+.variant-main.tc-e1rm {
+  border-width: 2px;
+}
+.variant-main.tc-rpe strong,
+.variant-main.tc-mav strong,
+.variant-main.tc-vbt strong,
+.variant-main.tc-e1rm strong {
+  font-size: 21px;
+}
+.tech-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tech-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+  background: var(--pill);
+  color: var(--tx);
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.15;
+}
+.ramp-info {
+  margin: 10px 0;
+  padding: 12px 13px;
+  border-radius: 12px;
+  border-left: 5px solid var(--ac, #3e8bff);
+  background: var(--pill);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.55;
+}
+.set-ramp input {
+  font-size: 17px;
+  font-weight: 800;
+}
+.set-card {
+  border-radius: 14px;
+}
+.set-title {
+  font-size: 14px;
+  line-height: 1.35;
+}
+.set-rest-hint {
+  font-size: 11px;
+  font-weight: 800;
+}
+.set-lock-hint,
+.set-prev-hint {
+  line-height: 1.45;
+}
+
+/* Più spazio e contrasto per chi legge meglio con blocchi separati */
+.ex-head {
+  display: block;
+}
+.ex-head .nm {
+  margin-bottom: 4px;
+  line-height: 1.25;
+}
+.ex-head .dt {
+  margin-top: 4px;
+  line-height: 1.65;
+}
+.ex.main .ex-head .nm {
+  font-size: 22px;
+  letter-spacing: .01em;
+}
+.ex.main .dt {
+  font-size: 17px;
+}
+
+/* Pulsanti delle serie autoregolate */
+.ramp-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ramp-actions button {
+  margin: 0;
+  padding: 12px 8px;
+  font-size: 13px;
+}
+.ramp-actions button:first-child {
+  border: 2px solid var(--ac, #3e8bff);
+  font-weight: 900;
+}
+
+/* Riduce l'affollamento e mantiene i contenuti ben separati */
+.piano-session-list .ex {
+  margin-bottom: 12px;
+}
+.piano-session-list .variant-panel + .sets-wrap {
+  margin-top: 8px;
+}
+
+@media (max-width: 420px) {
+  .variant-main {
+    padding: 11px;
+  }
+  .variant-main strong,
+  .variant-main.tc-rpe strong,
+  .variant-main.tc-mav strong,
+  .variant-main.tc-vbt strong,
+  .variant-main.tc-e1rm strong {
+    font-size: 18px;
+  }
+  .ramp-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ===== RPE / MAV: stato target molto evidente ===== */
+.ramp-info b {
+  font-weight: 950;
+}
