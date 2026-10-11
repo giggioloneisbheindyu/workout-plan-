@@ -1973,20 +1973,40 @@ function isIosDevice() {
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   } catch (e) { return false; }
 }
-/** Apre Comandi Rapidi "Recupero PL" con i secondi come input → Timer di sistema iPhone */
-function openSystemRestTimer(sec, ev) {
+/** Apre Comandi Rapidi "Recupero PL": secondi = avvia timer; "stop" = ferma timer sistema */
+function openSystemRestTimer(secOrStop, ev) {
   if (ev) { try { ev.stopPropagation(); ev.preventDefault(); } catch (e) {} }
-  sec = Math.max(15, Math.min(600, parseInt(sec, 10) || 120));
-  // Shortcut: riceve testo (secondi) → Avvia timer
   const name = encodeURIComponent('Recupero PL');
-  const text = encodeURIComponent(String(sec));
+  let text;
+  // stringa vuota = ferma timer (Se input non contiene nessun valore → Annulla)
+  if (secOrStop === 'stop' || secOrStop === 0 || secOrStop === '0') {
+    text = '';
+  } else {
+    const sec = Math.max(15, Math.min(600, parseInt(secOrStop, 10) || 120));
+    text = encodeURIComponent(String(sec));
+    try { localStorage.setItem('powerapp_rest_ends', String(Date.now() + sec * 1000)); } catch (e) {}
+  }
   const url = 'shortcuts://run-shortcut?name=' + name + '&input=text&text=' + text;
   try {
-    // salva per ripresa
-    try { localStorage.setItem('powerapp_rest_ends', String(Date.now() + sec * 1000)); } catch (e) {}
-    window.location.href = url;
+    // iframe nascosto evita di lasciare l'app in alcuni casi; fallback location
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = url;
+    document.body.appendChild(iframe);
+    setTimeout(() => { try { document.body.removeChild(iframe); } catch (e) {} }, 1500);
+    // fallback se iframe non basta
+    setTimeout(() => {
+      try {
+        const a = document.createElement('a');
+        a.href = url;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { try { document.body.removeChild(a); } catch (e) {} }, 500);
+      } catch (e) {}
+    }, 50);
   } catch (e) {
-    alert('Impossibile aprire Comandi. Crea lo shortcut "Recupero PL" (vedi istruzioni nel Piano).');
+    try { window.location.href = url; } catch (e2) {}
   }
 }
 function onRestFinished() {
@@ -2041,18 +2061,9 @@ function startRest(name, ev) {
   render();
   tick();
 
-  // iPhone: offri / apri timer di sistema (funziona a schermo spento)
-  if (isIosDevice() && S.restSystemTimer) {
-    // leggero delay così il render completa, poi chiede conferma
-    setTimeout(() => {
-      const ok = confirm(
-        'Timer recupero ' + fmtRest(sec) + '\n\n' +
-        'Su iPhone le notifiche web non suonano se il telefono è bloccato.\n\n' +
-        'OK = apri il Timer di sistema (Comandi "Recupero PL")\n' +
-        'Annulla = solo timer nell\'app'
-      );
-      if (ok) openSystemRestTimer(sec);
-    }, 80);
+  // iPhone: avvia subito il Timer di sistema (Comandi "Recupero PL")
+  if (isIosDevice() && S.restSystemTimer !== false) {
+    setTimeout(() => openSystemRestTimer(sec), 60);
   }
 }
 function stopRest(ev) {
@@ -2060,6 +2071,10 @@ function stopRest(ev) {
   if (_restTimer && _restTimer._iv) clearInterval(_restTimer._iv);
   _restTimer = null;
   try { localStorage.removeItem('powerapp_rest_ends'); localStorage.removeItem('powerapp_rest_name'); } catch (e) {}
+  // ferma anche il timer di sistema iPhone
+  if (isIosDevice() && S.restSystemTimer !== false) {
+    setTimeout(() => openSystemRestTimer('stop'), 40);
+  }
   render();
 }
 /** Se torni in app dopo background, completa il timer se scaduto */
@@ -2103,15 +2118,10 @@ function restBarHtml() {
   const m = Math.floor(left / 60);
   const s = left % 60;
   const done = left <= 0;
-  const sec = Math.max(15, left > 0 ? left : (getRestSec(_restTimer.name) || 120));
-  const iosBtn = isIosDevice() && !done
-    ? `<button type="button" class="rest-sys" onclick="openSystemRestTimer(${sec}, event)" title="Timer iPhone">Timer iPhone</button>`
-    : '';
   return `<div class="rest-bar ${done ? 'done' : ''}" id="rest-bar">
     <div class="rest-bar-inner">
       <span class="rest-label">Recupero · ${esc(_restTimer.name)}</span>
       <span id="rest-timer-display" class="rest-time ${done ? 'done' : ''}">${done ? 'Fine!' : (m + ':' + String(s).padStart(2, '0'))}</span>
-      ${iosBtn}
       <button type="button" class="rest-stop" onclick="stopRest(event)">${done ? 'Chiudi' : 'Stop'}</button>
     </div>
   </div>`;
@@ -3180,18 +3190,17 @@ function piano() {
   </div>
   <h1>Timer recupero (iPhone)</h1>
   <div class="card">
-    <p class="mut" style="margin-bottom:10px">Su iPhone il timer web si ferma a schermo spento. Usa il <b>Timer di sistema</b> tramite Comandi Rapidi: suona anche se sei su un’altra app.</p>
+    <p class="mut" style="margin-bottom:10px">Su iPhone il timer di sistema parte <b>in automatico</b> all’avvio del recupero e si ferma con <b>Stop</b>. Suona anche a schermo spento.</p>
     <button type="button" class="${S.restSystemTimer !== false ? 'pri' : ''}" onclick="S.restSystemTimer=!(S.restSystemTimer!==false);save();render()">
-      ${S.restSystemTimer !== false ? '✓ Chiedi Timer iPhone all’avvio recupero' : 'Chiedi Timer iPhone all’avvio recupero'}
+      ${S.restSystemTimer !== false ? '✓ Timer iPhone automatico attivo' : 'Timer iPhone automatico disattivo'}
     </button>
     <p class="mut" style="margin-top:12px;font-size:13px;line-height:1.45">
-      <b>Setup una tantum (1 minuto):</b><br>
-      1. Apri <b>Comandi</b> (Shortcuts)<br>
-      2. Nuovo comando, nome esatto: <b>Recupero PL</b><br>
-      3. Aggiungi azione <b>Avvia timer</b> (Start Timer)<br>
-      4. Durata → <b>Variabile</b> → <b>Input del comando</b> (come secondi)<br>
-      5. Se chiede unità, usa secondi o calcola Input÷60 per minuti<br>
-      6. Salva. All’avvio recupero tocca OK e parte il timer di sistema.
+      <b>Setup una tantum del comando «Recupero PL»:</b><br>
+      1. Apri <b>Comandi</b> → nome esatto: <b>Recupero PL</b><br>
+      2. Aggiungi azione <b>Se</b>: Input comando rapido <b>non contiene nessun valore</b><br>
+      3. Dentro il Se: <b>Annulla il timer attuale</b><br>
+      4. Altrimenti: <b>Avvia un timer di</b> → durata = <b>Input comando rapido</b> · <b>secondi</b><br>
+      5. Salva. Avvio manda i secondi; Stop manda input vuoto → annulla.
     </p>
   </div>
   <h1>Settimane</h1>${S.prog.weeks.map((w, i) => `${makeEditCard(w.label)}<div class="wk ${i === S.wi ? 'cur' : ''} ${S.dayEdit && S.dayEdit.week === w.label ? 'wk-editing' : ''}" onclick="S.wi=${i};save();render()"><div class="wk-top"><b>${esc(w.label)}</b><button class="res-btn" onclick="resetWk('${w.label}', event)">❌</button></div>${weekDots(w)}</div>`).join('')}
