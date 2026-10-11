@@ -800,11 +800,40 @@ function analyzeEx(e) {
   T.dynamic = (ramp && !T.pctOfMav) || T.restpause || T.drop || T.amrap || T.backoff;
   return (_techCache[t] = T);
 }
+
+/** Divide una prescrizione in blocchi sui simboli "+" (e ";"), nell'ordine originale.
+ *  Non spezza i cluster "3x(2+2+1)" / "cluster 2+2+1" né "+" dentro parentesi. */
+function splitPrescriptionBlocks(raw) {
+  const text = String(raw || '');
+  const parts = [];
+  let depth = 0, cur = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '(') depth++;
+    else if (ch === ')') depth = Math.max(0, depth - 1);
+    let sep = false;
+    if (depth === 0 && ch === ';') sep = true;
+    else if (depth === 0 && ch === '+') {
+      const prev = text[i - 1], next = text[i + 1];
+      const spaced = /\s/.test(prev || '') || /\s/.test(next || '');
+      const prevCh = text.slice(0, i).trimEnd().slice(-1), nextCh = text.slice(i + 1).trimStart()[0];
+      const digitDigit = /\d/.test(prevCh) && /\d/.test(nextCh || '');
+      // "2+2+1" senza spazi e senza @ / % nel blocco corrente → cluster, non separatore
+      if (!digitDigit || spaced || /[@%]|rpe|rir/i.test(cur)) sep = true;
+    }
+    if (sep) { parts.push(cur); cur = ''; } else cur += ch;
+  }
+  parts.push(cur);
+  let out = parts.map(x => x.trim()).filter(Boolean);
+  // cluster scritto "2 + 2 + 1" con parola cluster: tutti numeri → un solo blocco
+  if (out.length > 1 && /\bcluster\b/i.test(text) && out.every(x => /^\d+$/.test(x))) out = [out.join('+')];
+  return out;
+}
 /** Analizza stringhe miste ("2x2s 70% + 5@7 + istintiva") separandole in configurazioni per serie */
 function parseComplexSets(text, lift) {
   const raw = String(text || '');
   // split: "mav5 + 3x3s 100% del mav" → due blocchi
-  const parts = raw.split(/\s*;\s*|\s+\+\s+/).map(x => x.trim()).filter(Boolean);
+  const parts = splitPrescriptionBlocks(raw);
   if (!parts.length) parts.push(raw);
 
   let configs = [];
@@ -891,6 +920,15 @@ function parseComplexSets(text, lift) {
       return;
     }
 
+    // istintiva: sezione libera (kg e rip modificabili, serie aggiungibili)
+    if (T.instinct && !T.mav && !T.rpe && !T.pctOfMav && T.mode === 'free') {
+      const nInst = explicitSets ? count : (parts.length > 1 ? 1 : count);
+      for (let i = 0; i < nInst; i++) {
+        configs.push({ blockIdx: bIdx, partText: part, mode: 'free', dynamic: false, role: 'inst', reps: null, kg: null, kgLocked: false, rpe: T.rpe, T: T, info: info });
+      }
+      return;
+    }
+
     for (let i = 0; i < count; i++) {
       configs.push({
         blockIdx: bIdx,
@@ -933,52 +971,80 @@ function getMavKgFromLog(log, configs) {
   }
   return null;
 }
-/** Espande serie MAV / RPE in base a quante ne ha aggiunte l'utente */
+/** Tipologia del blocco (in base alla prima configurazione) */
+function blockKindOf(cfg) {
+  if (!cfg) return 'fixed';
+  if (cfg.role === 'mav') return 'mav';
+  if (cfg.role === 'rpe') return 'rpe';
+  if (cfg.role === 'mavBackoff') return 'pctmav';
+  if (cfg.role === 'inst') return 'inst';
+  if (cfg.mode === 'ramp' || cfg.dynamic) return 'ramp';
+  if (cfg.T && cfg.T.pct != null) return 'pct';
+  if (/%/.test(cfg.partText || '')) return 'pct';
+  return 'fixed';
+}
+const BLOCK_EXPANDABLE = { mav: true, rpe: true, inst: true, ramp: true };
+const BLOCK_LABEL = { mav: 'MAV', rpe: 'RPE', pctmav: '% del MAV', inst: 'Istintiva', ramp: 'Autoregolata', pct: 'Percentuale fissa', fixed: 'Serie fisse' };
+/** Raggruppa le configurazioni base per blocco, nell'ordine originale */
+function groupBlocks(complex) {
+  const blocks = [];
+  ((complex && complex.configs) || []).forEach(c => {
+    let b = blocks[blocks.length - 1];
+    if (!b || b.idx !== c.blockIdx) { b = { idx: c.blockIdx, text: c.partText, base: [] }; blocks.push(b); }
+    b.base.push(c);
+  });
+  blocks.forEach(b => { b.kind = blockKindOf(b.base[0]); b.expandable = !!BLOCK_EXPANDABLE[b.kind]; });
+  return blocks;
+}
+/** Vecchio formato (serie MAV/RPE per prime, poi le altre, poi i back-off): riordina nel layout a blocchi */
+function migrateRowToBlocks(row, complex) {
+  if (row.extra) return;
+  const cfgs = (complex && complex.configs) || [];
+  const blocks = groupBlocks(complex);
+  row.extra = {};
+  if (!cfgs.length || !Array.isArray(row.sets)) return;
+  const total = row.sets.length;
+  const mavT = cfgs.find(c => c.role === 'mav'), rpeT = cfgs.find(c => c.role === 'rpe');
+  const expRole = mavT ? 'mav' : (rpeT ? 'rpe' : null);
+  const nBo = cfgs.filter(c => c.role === 'mavBackoff').length;
+  const other = cfgs.filter(c => c.role !== 'mav' && c.role !== 'rpe' && c.role !== 'mavBackoff');
+  const nBase = expRole ? cfgs.filter(c => c.role === expRole).length : 0;
+  if (expRole) {
+    const nExp = Math.max(nBase, total - nBo - other.length);
+    const legacy = [];
+    for (let i = 0; i < nExp; i++) legacy.push(Object.assign({}, mavT || rpeT));
+    other.forEach(c => legacy.push(c));
+    cfgs.filter(c => c.role === 'mavBackoff').forEach(c => legacy.push(c));
+    if (legacy.length === total) {
+      const tagged = row.sets.map((st, i) => ({ st, bi: legacy[i].blockIdx, i }));
+      const order = blocks.map(b => b.idx);
+      tagged.sort((x, y) => (order.indexOf(x.bi) - order.indexOf(y.bi)) || (x.i - y.i));
+      row.sets = tagged.map(t => t.st);
+      const firstExp = blocks.find(b => b.base[0].role === expRole);
+      if (firstExp && nExp > nBase) row.extra[firstExp.idx] = nExp - nBase;
+    }
+  } else if (total > cfgs.length) {
+    const last = blocks[blocks.length - 1];
+    if (last && last.expandable) row.extra[last.idx] = total - cfgs.length;
+  }
+}
+/** Elenco ordinato delle configurazioni effettive (una per serie), blocco per blocco */
 function buildEffectiveConfigs(complex, log) {
-  const configs = (complex && complex.configs) || [];
-  const mavT = configs.find(c => c.role === 'mav');
-  const rpeT = configs.find(c => c.role === 'rpe');
-  const expandable = mavT || rpeT;
-  if (!expandable) return configs;
-  const role = mavT ? 'mav' : 'rpe';
-  const template = mavT || rpeT;
-  const backoff = configs.filter(c => c.role === 'mavBackoff');
-  const other = configs.filter(c => c.role !== 'mav' && c.role !== 'rpe' && c.role !== 'mavBackoff');
-  const nBo = backoff.length;
-  const nOther = other.length;
-  const nBase = configs.filter(c => c.role === role).length;
-  const total = (log && log.sets && log.sets.length) || configs.length;
-  const nExp = Math.max(nBase, total - nBo - nOther);
+  const blocks = groupBlocks(complex);
+  if (!blocks.length) return (complex && complex.configs) || [];
+  if (log && Array.isArray(log.sets)) migrateRowToBlocks(log, complex);
+  const extra = (log && log.extra) || {};
   const out = [];
-  for (let i = 0; i < nExp; i++) out.push(Object.assign({}, template, { role: role }));
-  other.forEach(c => out.push(c));
-  backoff.forEach(c => out.push(c));
+  blocks.forEach(b => {
+    const n = b.expandable ? Math.max(1, b.base.length + (extra[b.idx] || 0)) : b.base.length;
+    for (let k = 0; k < n; k++) {
+      const src = b.base[Math.min(k, b.base.length - 1)];
+      out.push(Object.assign({}, src, { blockKind: b.kind, bpos: k, bsize: n, blockIdx: b.idx }));
+    }
+  });
   return out;
 }
-function countExpandableSets(log, complex, role) {
-  const nBo = (complex.configs || []).filter(c => c.role === 'mavBackoff').length;
-  const nOther = (complex.configs || []).filter(c => c.role !== role && c.role !== 'mavBackoff' && c.role !== 'mav' && c.role !== 'rpe').length;
-  // exclude the other expandable type from "other"
-  const nOther2 = (complex.configs || []).filter(c => {
-    if (c.role === 'mavBackoff') return false;
-    if (c.role === role) return false;
-    return true;
-  }).length;
-  return Math.max(1, ((log && log.sets) || []).length - nOther2);
-}
-function countMavSets(log, complex) {
-  return countExpandableSets(log, complex, 'mav');
-}
-function countRpeSets(log, complex) {
-  return countExpandableSets(log, complex, 'rpe');
-}
-function addMavSet(week, day, i) {
-  try { flushSetInputsFromDOM(); } catch (e) {}
-  const wObj = (S.prog && S.prog.weeks.find(x => x.label === week)) || W();
-  if (!wObj) return;
-  const exs = dayExercises(wObj, day);
-  const e = exs && exs[i];
-  if (!e) return;
+function blockExLift(e) {
   let lift = e.lift;
   if (!lift && isMainLift(e)) {
     const n = String(e.name || '').toLowerCase();
@@ -986,108 +1052,58 @@ function addMavSet(week, day, i) {
     else if (/panca|bench/.test(n)) lift = 'b';
     else if (/stacco|deadlift|sumo|regular/.test(n)) lift = 'd';
   }
-  const complex = parseComplexSets(e.text, lift);
-  const mavT = complex.configs.find(c => c.role === 'mav');
-  if (!mavT) {
-    addRampSet(week, day, i);
-    return;
+  return lift;
+}
+/** Aggiunge (delta=+1) o toglie (delta=-1) una serie al SOLO blocco indicato */
+function changeBlockSets(week, day, i, blockIdx, delta) {
+  try { flushSetInputsFromDOM(); } catch (e) {}
+  const wObj = (S.prog && S.prog.weeks.find(x => x.label === week)) || W();
+  if (!wObj) return;
+  const exs = dayExercises(wObj, day);
+  const e = exs && exs[i];
+  if (!e) return;
+  const complex = parseComplexSets(e.text, blockExLift(e));
+  const blocks = groupBlocks(complex);
+  const blk = blocks.find(b => b.idx === blockIdx) || (blockIdx == null ? blocks.find(b => b.expandable) : null);
+  if (!blk || !blk.expandable) return; // blocchi a serie fisse: nessuna aggiunta/rimozione
+  const row = getExLog(week, day, i, complex.configs.length);
+  const before = buildEffectiveConfigs(complex, row);
+  const start = before.findIndex(c => c.blockIdx === blk.idx);
+  const cnt = before.filter(c => c.blockIdx === blk.idx).length;
+  if (start < 0) return;
+  if (delta > 0) {
+    const t = blk.base[0];
+    const nw = { kg: '', reps: (t.reps != null && blk.kind !== 'inst') ? String(t.reps) : '', done: false };
+    if (blk.kind === 'rpe' || blk.kind === 'ramp') nw.rpe = '';
+    row.sets.splice(start + cnt, 0, nw);
+    row.extra[blk.idx] = (row.extra[blk.idx] || 0) + 1;
+  } else {
+    if (cnt <= 1) return;
+    row.sets.splice(start + cnt - 1, 1);
+    row.extra[blk.idx] = (row.extra[blk.idx] || 0) - 1;
   }
-  const row = getExLog(week, day, i);
-  const nBo = complex.configs.filter(c => c.role === 'mavBackoff').length;
-  const nOther = complex.configs.filter(c => c.role !== 'mav' && c.role !== 'mavBackoff').length;
-  const insertAt = Math.max(1, row.sets.length - nBo - nOther); // sotto all'ultimo MAV
-  const reps = mavT.reps != null ? String(mavT.reps) : '';
-  row.sets.splice(insertAt, 0, { kg: '', reps: reps, done: false });
   row.dyn = true;
   const k = week + '|' + day, a = S.chk[k];
-  if (a && a.indexOf(i) >= 0) a.splice(a.indexOf(i), 1);
+  if (delta > 0 && a && a.indexOf(i) >= 0) a.splice(a.indexOf(i), 1);
+  if (delta < 0) syncExerciseDoneFromSets(week, day, i);
   save();
   render();
 }
-function removeMavSet(week, day, i) {
-  try { flushSetInputsFromDOM(); } catch (e) {}
+function addBlockSet(week, day, i, blockIdx) { changeBlockSets(week, day, i, blockIdx, 1); }
+function removeBlockSet(week, day, i, blockIdx) { changeBlockSets(week, day, i, blockIdx, -1); }
+function addMavSet(week, day, i) { changeBlockSets(week, day, i, firstBlockOfRole(week, day, i, 'mav'), 1); }
+function removeMavSet(week, day, i) { changeBlockSets(week, day, i, firstBlockOfRole(week, day, i, 'mav'), -1); }
+function addRpeSet(week, day, i) { changeBlockSets(week, day, i, firstBlockOfRole(week, day, i, 'rpe'), 1); }
+function removeRpeSet(week, day, i) { changeBlockSets(week, day, i, firstBlockOfRole(week, day, i, 'rpe'), -1); }
+function firstBlockOfRole(week, day, i, role) {
   const wObj = (S.prog && S.prog.weeks.find(x => x.label === week)) || W();
-  if (!wObj) return;
-  const exs = dayExercises(wObj, day);
-  const e = exs && exs[i];
-  if (!e) return;
-  let lift = e.lift;
-  if (!lift && isMainLift(e)) {
-    const n = String(e.name || '').toLowerCase();
-    if (/squat|acconsc/.test(n)) lift = 's';
-    else if (/panca|bench/.test(n)) lift = 'b';
-    else if (/stacco|deadlift|sumo|regular/.test(n)) lift = 'd';
-  }
-  const complex = parseComplexSets(e.text, lift);
-  const row = getExLog(week, day, i);
-  const nBo = complex.configs.filter(c => c.role === 'mavBackoff').length;
-  const nOther = complex.configs.filter(c => c.role !== 'mav' && c.role !== 'mavBackoff').length;
-  const nMav = row.sets.length - nBo - nOther;
-  if (nMav <= 1) return; // tieni almeno 1 MAV
-  row.sets.splice(nMav - 1, 1);
-  syncExerciseDoneFromSets(week, day, i);
-  save();
-  render();
+  const e = wObj && dayExercises(wObj, day) && dayExercises(wObj, day)[i];
+  if (!e) return null;
+  const b = groupBlocks(parseComplexSets(e.text, blockExLift(e))).find(x => x.kind === role);
+  return b ? b.idx : null;
 }
 /** toglie dal testo RPE/RIR/%/tempo che altrimenti verrebbero scambiati per serie (es. "@7-8", "tempo 3-1-0") */
-function addRpeSet(week, day, i) {
-  try { flushSetInputsFromDOM(); } catch (e) {}
-  const wObj = (S.prog && S.prog.weeks.find(x => x.label === week)) || W();
-  if (!wObj) return;
-  const exs = dayExercises(wObj, day);
-  const e = exs && exs[i];
-  if (!e) return;
-  let lift = e.lift;
-  if (!lift && isMainLift(e)) {
-    const n = String(e.name || '').toLowerCase();
-    if (/squat|acconsc/.test(n)) lift = 's';
-    else if (/panca|bench/.test(n)) lift = 'b';
-    else if (/stacco|deadlift|sumo|regular/.test(n)) lift = 'd';
-  }
-  const complex = parseComplexSets(e.text, lift);
-  const rpeT = complex.configs.find(c => c.role === 'rpe');
-  if (!rpeT) {
-    addRampSet(week, day, i);
-    return;
-  }
-  const row = getExLog(week, day, i);
-  const nBo = complex.configs.filter(c => c.role === 'mavBackoff').length;
-  const nOther = complex.configs.filter(c => c.role !== 'rpe' && c.role !== 'mavBackoff').length;
-  const insertAt = Math.max(1, row.sets.length - nBo - nOther);
-  const reps = rpeT.reps != null ? String(rpeT.reps) : '';
-  row.sets.splice(insertAt, 0, { kg: '', reps: reps, rpe: '', done: false });
-  row.dyn = true;
-  const k = week + '|' + day, a = S.chk[k];
-  if (a && a.indexOf(i) >= 0) a.splice(a.indexOf(i), 1);
-  save();
-  render();
-}
-function removeRpeSet(week, day, i) {
-  try { flushSetInputsFromDOM(); } catch (e) {}
-  const wObj = (S.prog && S.prog.weeks.find(x => x.label === week)) || W();
-  if (!wObj) return;
-  const exs = dayExercises(wObj, day);
-  const e = exs && exs[i];
-  if (!e) return;
-  let lift = e.lift;
-  if (!lift && isMainLift(e)) {
-    const n = String(e.name || '').toLowerCase();
-    if (/squat|acconsc/.test(n)) lift = 's';
-    else if (/panca|bench/.test(n)) lift = 'b';
-    else if (/stacco|deadlift|sumo|regular/.test(n)) lift = 'd';
-  }
-  const complex = parseComplexSets(e.text, lift);
-  const row = getExLog(week, day, i);
-  const nBo = complex.configs.filter(c => c.role === 'mavBackoff').length;
-  const nOther = complex.configs.filter(c => c.role !== 'rpe' && c.role !== 'mavBackoff').length;
-  const nRpe = row.sets.length - nBo - nOther;
-  if (nRpe <= 1) return;
-  row.sets.splice(nRpe - 1, 1);
-  syncExerciseDoneFromSets(week, day, i);
-  save();
-  render();
-}
-
+/** toglie dal testo RPE/RIR/%/tempo che altrimenti verrebbero scambiati per serie (es. "@7-8", "tempo 3-1-0") */
 function stripNoise(text) {
   const N = '\\d+(?:[.,]\\d+)?', RG = '(?:\\s*[-–\\/]\\s*' + N + ')?';
   return String(text || '')
@@ -1168,21 +1184,13 @@ function rampHeaderHtml(T, info, log, est, lift) {
   if (e1 != null) bits.push(`e1RM stimato ≈ <b>${String(e1).replace('.', ',')} kg</b>`);
   return `<p class="ramp-info">${bits.join('<br>')}</p>`;
 }
-function addRampSet(week, day, i) {
-  try { flushSetInputsFromDOM(); } catch (e) {}
-  const row = getExLog(week, day, i);
-  row.dyn = true;
-  row.sets.push({ kg: '', reps: '', rpe: '', done: false });
-  const k = week + '|' + day, a = S.chk[k];
-  if (a && a.indexOf(i) >= 0) a.splice(a.indexOf(i), 1);
-  save(); render();
-}
+function addRampSet(week, day, i) { changeBlockSets(week, day, i, null, 1); }
 function removeLastSet(week, day, i) {
-  try { flushSetInputsFromDOM(); } catch (e) {}
-  const row = getExLog(week, day, i);
-  if (row.sets.length > 1) row.sets.pop();
-  syncExerciseDoneFromSets(week, day, i);
-  save(); render();
+  const wObj = (S.prog && S.prog.weeks.find(x => x.label === week)) || W();
+  const e = wObj && dayExercises(wObj, day) && dayExercises(wObj, day)[i];
+  if (!e) return;
+  const bl = groupBlocks(parseComplexSets(e.text, blockExLift(e))).filter(b => b.expandable);
+  if (bl.length) changeBlockSets(week, day, i, bl[bl.length - 1].idx, -1);
 }
 
 /** Quante serie ha l'esercizio (dal testo scheda) */
@@ -1242,6 +1250,9 @@ function parseSets(text) {
   if (m) return { count: parseInt(m[1], 10) || 3, targets: null, reps: parseInt(m[2], 10) };
   m = t.match(/(\d+)\s*(?:serie|sets?)\b/i);
   if (m) return { count: parseInt(m[1], 10) || 3, targets: null };
+  // rip@RPE: "5@7" → 1 serie da 5 rip
+  m = raw.match(/(?:^|[\s+])(\d+)\s*@\s*\d/);
+  if (m) return { count: 1, targets: null, reps: parseInt(m[1], 10) };
   // singola / doppia / tripla
   m = t.match(/\b(singola|doppia|tripla)\b/i);
   if (m) return { count: 1, targets: null, reps: { singola: 1, doppia: 2, tripla: 3 }[m[1].toLowerCase()] };
@@ -1288,6 +1299,20 @@ function setExSetLog(week, day, i, setIdx, field, value, skipSave) {
   if (!skipSave) save();
 }
 /** Propaga i kg alle serie successive vuote — chiamare solo su blur/change, non su ogni tasto */
+/** indice (escluso) in cui finisce il blocco che contiene la serie setIdx */
+function blockEndForSet(week, day, i, setIdx, row) {
+  try {
+    const wObj = (S.prog && S.prog.weeks.find(x => x.label === week)) || W();
+    const e = wObj && dayExercises(wObj, day) && dayExercises(wObj, day)[i];
+    if (!e) return row.sets.length;
+    const eff = buildEffectiveConfigs(parseComplexSets(e.text, blockExLift(e)), row);
+    const cur = eff[setIdx];
+    if (!cur) return row.sets.length;
+    let end = setIdx + 1;
+    while (end < eff.length && eff[end].blockIdx === cur.blockIdx) end++;
+    return Math.min(end, row.sets.length);
+  } catch (err) { return row.sets.length; }
+}
 function cascadeKgFromSet(week, day, i, setIdx) {
   const row = getExLog(week, day, i);
   if (!row.sets[setIdx]) return;
@@ -1295,7 +1320,8 @@ function cascadeKgFromSet(week, day, i, setIdx) {
   if (value === '' || value == null) return;
   const active = document.activeElement;
   let dirty = false;
-  for (let j = setIdx + 1; j < row.sets.length; j++) {
+  const bEnd = blockEndForSet(week, day, i, setIdx, row);
+  for (let j = setIdx + 1; j < bEnd; j++) {
     if (row.sets[j].done) continue;
     if (row.sets[j].kg !== '' && row.sets[j].kg != null) continue;
     row.sets[j].kg = value;
@@ -1309,7 +1335,7 @@ function cascadeKgFromSet(week, day, i, setIdx) {
       if (Number(c.getAttribute('data-day')) !== Number(day)) return;
       if (Number(c.getAttribute('data-exi')) !== Number(i)) return;
       const seti = Number(c.getAttribute('data-set'));
-      if (seti <= setIdx) return;
+      if (seti <= setIdx || seti >= bEnd) return;
       if (row.sets[seti] && row.sets[seti].done) return;
       const inp = c.querySelector('input');
       if (inp && inp !== active && (inp.value === '' || inp.value == null)) {
@@ -1621,10 +1647,11 @@ function saveSessionLogs(week, day, exercises) {
     }
     const complex = parseComplexSets(e.text, lift);
     const log = getExLog(week, day, i, complex.configs.length);
+    const effC = buildEffectiveConfigs(complex, log);
 
     if (isMainLift(e)) {
       const sets = log.sets.map((s, si) => {
-        const c = complex.configs[si] || complex.configs[complex.configs.length - 1] || {};
+        const c = effC[si] || effC[effC.length - 1] || {};
         const mode = c.mode || 'fixed';
         const prescKg = c.kg;
         const prescRep = c.reps;
@@ -1663,7 +1690,9 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
   const hasMav = complex.configs.some(c => c.role === 'mav');
   const hasRpeRole = complex.configs.some(c => c.role === 'rpe');
   const log = getExLog(weekLabel, day, exIndex, complex.configs.length || info.count);
-  if (complex.hasDynamic || hasMav || hasRpeRole) log.dyn = true;
+  const blocksList = groupBlocks(complex);
+  const multiBlock = blocksList.length > 1;
+  if (complex.hasDynamic || hasMav || hasRpeRole || blocksList.some(b => b.expandable)) log.dyn = true;
   // allinea lunghezza: MAV extra già in log
   const eff0 = buildEffectiveConfigs(complex, log);
   while (log.sets.length < eff0.length) log.sets.push({ kg: '', reps: '', done: false });
@@ -1693,7 +1722,7 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
   if (mono) log.sets.forEach(st => ensureMonoSides(st));
 
   return `<div class="sets-wrap ${allLocked ? 'sets-locked' : ''} ${mono ? 'sets-mono' : ''}">
-    ${T.mode === 'ramp' ? rampHeaderHtml(T, info, log, est, lift) : (T.mode === 'free' ? '<p class="ramp-info">Istintivo: kg e rip liberi, scegli a sensazione</p>' : '')}
+    ${multiBlock ? '' : (T.mode === 'ramp' ? rampHeaderHtml(T, info, log, est, lift) : (T.mode === 'free' ? '<p class="ramp-info">Istintivo: kg e rip liberi, scegli a sensazione</p>' : ''))}
     ${log.sets.map((s, si) => {
       const c = effConfigs[si] || effConfigs[effConfigs.length - 1] || {};
       const cT = c.T || T;
@@ -1727,7 +1756,7 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
         + (isRpe ? ' · ' + (cT.rpe ? cT.rpe.txt : 'RPE') + (prescRep != null ? ' · ' + prescRep + ' rip' : '') : '')
         + (isMavBo ? ' · ' + (pctMav != null ? pctMav + '% del MAV' : 'del MAV') : '')
         + (cInfo.roles && cInfo.roles[si] === 'top' ? ' · Top set' : cInfo.roles && cInfo.roles[si] === 'backoff' ? ' · Back-off' : '')
-        + (mode === 'ramp' && !cInfo.roles && !isMav && si >= (cInfo.count || 1) ? ' · extra' : '')
+        + (mode === 'ramp' && !cInfo.roles && !isMav && (c.bpos != null ? c.bpos : si) >= (cInfo.count || 1) ? ' · extra' : '')
         + (mode === 'ramp' && cT.rpe && rpeOf(s) != null && rpeOf(s) >= cT.rpe.lo ? ' · target ✓' : '');
 
       const isDone = !!s.done;
@@ -1778,7 +1807,10 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
         const kgVal = s.kg != null && s.kg !== '' ? esc(String(s.kg)) : '';
         const repVal = s.reps != null && s.reps !== '' ? esc(String(s.reps)) : (!repsEditable && prescRep != null ? String(prescRep) : '');
         const rpeVal = s.rpe != null && s.rpe !== '' ? esc(String(s.rpe)) : '';
-        const ph = rampPlaceholder(cT, cInfo, log, si, (prescKg != null ? prescKg : est));
+        const bStart = si - (c.bpos || 0);
+        const bLog = { sets: log.sets.slice(bStart, bStart + (c.bsize || log.sets.length)) };
+        const bEst = multiBlock ? (prescKg != null ? prescKg : rpeTargetKg(cT, prescRep, lift)) : (prescKg != null ? prescKg : est);
+        const ph = rampPlaceholder(cT, cInfo, bLog, c.bpos || 0, bEst);
         const roRepAttr = !repsEditable ? 'readonly class="ro-input" tabindex="-1"' : '';
         
         inputs = `<div class="set-inputs set-ramp">
@@ -1808,34 +1840,42 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
 
       return `<div class="set-card ${isDone ? 'set-done' : ''} ${isLocked ? 'set-locked' : ''}" data-ex="${esc(exercise.name)}" data-week="${esc(weekLabel)}" data-day="${day}" data-exi="${exIndex}" data-set="${si}" role="button" title="${isDone ? 'Serie fatta · tocca per annullare' : 'Tocca: segna fatta + recupero ' + fmtRest(restSec)}">
         <div class="set-label">
-          <span class="set-title">${isDone ? '✓ ' : ''}Serie ${si + 1}${roleLbl}${prescRep != null && repsEditable ? ' · obiettivo ' + prescRep + ' rip' : ''}</span>
+          <span class="set-title">${isDone ? '✓ ' : ''}Serie ${(multiBlock && c.bpos != null ? c.bpos : si) + (multiBlock && c.bpos != null ? 1 : 1)}${roleLbl}${c.role === 'inst' ? ' · libera' : ''}${multiBlock && c.blockKind === 'pct' && c.T && /%/.test(c.partText || '') ? ' · ' + (String(c.partText).match(/(\d+(?:[.,]\d+)?)\s*%/) || [])[1] + '%' : ''}${prescRep != null && repsEditable ? ' · obiettivo ' + prescRep + ' rip' : ''}</span>
           <span class="set-rest-hint">${isDone ? 'fatta' : fmtRest(restSec)}</span>
         </div>
         ${inputs}
       </div>`;
     }).reduce((acc, html, si) => {
-      acc.push(html);
       const cfg = effConfigs[si];
+      const prev = effConfigs[si - 1];
       const next = effConfigs[si + 1];
-      // bottoni +/− sotto l'ultimo set MAV
-      if (hasMav && cfg && cfg.role === 'mav' && (!next || next.role !== 'mav') && !mono) {
-        const nMav = countMavSets(log, complex);
-        acc.push(`<div class="ramp-actions mav-actions">
-          <button type="button" onclick='addMavSet(${wJs},${day},${exIndex})'>＋ Aggiungi serie MAV</button>
-          ${nMav > 1 ? `<button type="button" onclick='removeMavSet(${wJs},${day},${exIndex})'>− Togli ultima MAV</button>` : ''}
-        </div>`);
+      // intestazione del blocco (solo prescrizioni con più blocchi)
+      if (multiBlock && cfg && (!prev || prev.blockIdx !== cfg.blockIdx)) {
+        const bn = blocksList.findIndex(b => b.idx === cfg.blockIdx) + 1;
+        const bsz = cfg.bsize != null ? cfg.bsize : 1;
+        const bStart = si;
+        const bLog = { sets: log.sets.slice(bStart, bStart + bsz) };
+        const cT0 = cfg.T || T;
+        const estB = cfg.kg != null ? cfg.kg : rpeTargetKg(cT0, cfg.reps, lift);
+        const extraHdr = cfg.blockKind === 'rpe' || cfg.blockKind === 'ramp' ? rampHeaderHtml(cT0, cfg.info || info, bLog, estB, lift) : '';
+        const fixedHint = cfg.blockKind === 'pct' ? '<p class="ramp-info">Serie, rip e kg fissi dalla scheda</p>' : (cfg.blockKind === 'inst' ? '<p class="ramp-info">Istintivo: kg e rip liberi, scegli a sensazione</p>' : '');
+        acc.push(`<div class="block-head block-${cfg.blockKind}"><span class="block-n">Blocco ${bn} — ${esc(BLOCK_LABEL[cfg.blockKind] || '')}</span><span class="block-txt">${esc(cfg.partText || '')}</span></div>${extraHdr}${fixedHint}`);
       }
-      // bottoni +/− sotto l'ultimo set RPE
-      if (hasRpeRole && cfg && cfg.role === 'rpe' && (!next || next.role !== 'rpe') && !mono) {
-        const nRpe = countRpeSets(log, complex);
-        acc.push(`<div class="ramp-actions rpe-actions">
-          <button type="button" onclick='addRpeSet(${wJs},${day},${exIndex})'>＋ Aggiungi serie RPE</button>
-          ${nRpe > 1 ? `<button type="button" onclick='removeRpeSet(${wJs},${day},${exIndex})'>− Togli ultima RPE</button>` : ''}
+      acc.push(html);
+      // bottoni +/− sotto l'ultima serie di ogni blocco espandibile
+      if (cfg && (!next || next.blockIdx !== cfg.blockIdx) && !mono) {
+        const blk = blocksList.find(b => b.idx === cfg.blockIdx);
+        if (blk && blk.expandable) {
+          const lbl = { mav: 'MAV', rpe: 'RPE', inst: 'istintiva', ramp: '', pct: '', fixed: '' }[blk.kind] || '';
+          const cls = blk.kind === 'mav' ? 'mav-actions' : (blk.kind === 'rpe' ? 'rpe-actions' : '');
+          acc.push(`<div class="ramp-actions ${cls}">
+          <button type="button" onclick='addBlockSet(${wJs},${day},${exIndex},${blk.idx})'>＋ Aggiungi serie${lbl ? ' ' + lbl : ''}</button>
+          ${cfg.bsize > 1 ? `<button type="button" onclick='removeBlockSet(${wJs},${day},${exIndex},${blk.idx})'>− Togli ultima${lbl ? ' ' + lbl : ''}</button>` : ''}
         </div>`);
+        }
       }
       return acc;
     }, []).join('')}
-    ${!hasMav && complex.hasDynamic && !mono ? `<div class="ramp-actions"><button type="button" onclick='addRampSet(${wJs},${day},${exIndex})'>＋ Aggiungi serie</button>${log.sets.length > 1 ? `<button type="button" onclick='removeLastSet(${wJs},${day},${exIndex})'>− Togli ultima</button>` : ''}</div>` : ''}
   </div>`;
 }
 /** secondi → "HH:MM:SS" per input type=time */
@@ -2461,9 +2501,10 @@ function logFinishedWorkout(weekLabel, day, weekdayOverride) {
         }
         const complex = parseComplexSets(e.text, lift);
         const log = getExLog(weekLabel, day, i, complex.configs.length);
+        const effC = buildEffectiveConfigs(complex, log);
 
         sets = (log.sets || []).map((s, si) => {
-          const c = complex.configs[si] || complex.configs[complex.configs.length - 1] || {};
+          const c = effC[si] || effC[effC.length - 1] || {};
           const mode = c.mode || 'fixed';
           const prescKg = c.kg;
           const prescRep = c.reps;
@@ -3438,6 +3479,10 @@ window.addMavSet = addMavSet;
 window.removeMavSet = removeMavSet;
 window.addRpeSet = addRpeSet;
 window.removeRpeSet = removeRpeSet;
+window.addBlockSet = addBlockSet;
+window.removeBlockSet = removeBlockSet;
+window.addRampSet = addRampSet;
+window.removeLastSet = removeLastSet;
 window.exportWorkoutCsv = exportWorkoutCsv;
 window.cancelPianoSession = cancelPianoSession;
 window.savePianoSession = savePianoSession;

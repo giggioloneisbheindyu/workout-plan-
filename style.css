@@ -1423,3 +1423,52 @@ input.kg-suggested {
   flex: none !important;
   white-space: nowrap;
 }
+/* Container Blocchi Indipendenti */
+.workout-block {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 2px dashed var(--bd);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workout-block:first-child {
+  border-top: none;
+  margin-top: 4px;
+  padding-top: 0;
+}
+
+.block-header {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 4px;
+}
+
+.block-title {
+  font-size: 11px;
+  font-weight: 900;
+  color: var(--ac, #3e8bff);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.block-desc {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--tx);
+  background: var(--pill);
+  padding: 4px 8px;
+  border-radius: 6px;
+  display: inline-block;
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.block-locked .block-title {
+  color: var(--mut);
+}
+/* Blocchi di prescrizione dentro lo stesso esercizio */
+.block-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 10px;margin:14px 0 6px;padding:6px 10px;border-left:3px solid var(--ac,#3e8bff);border-radius:6px;background:rgba(127,127,127,.12);font-size:.85rem}
+.block-head .block-n{font-weight:700}
+.block-head .block-txt{opacity:.75;word-break:break-word}
