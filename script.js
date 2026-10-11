@@ -2,7 +2,7 @@ const KEY = 'powerapp_v1', AC = ['#e5484d', '#3e8bff', '#e08a00', '#30a46c'], LN
 let S = {};
 try { S = JSON.parse(localStorage.getItem(KEY)) || {} } catch (e) { }
 S.max = S.max || { s: 210, b: 110, d: 265 }; S.done = S.done || {}; S.chk = S.chk || {}; S.wi = S.wi || 0; S.view = S.view || 'oggi'; S.time = S.time || '17:00'; S.pushOn = S.pushOn || false; S.weekLog = S.weekLog || {}; S.promptedDate = S.promptedDate || null; S.dayModal = S.dayModal || null; S.accLog = S.accLog || {}; S.liftHistory = S.liftHistory || {}; S.restByEx = S.restByEx || {}; S.restDefault = S.restDefault || 120; S.restPicker = S.restPicker || null; S.workoutLog = S.workoutLog || []; S.progCatalog = S.progCatalog || []; S.pianoSession = S.pianoSession || null;
-S.compModal = S.compModal || null;
+S.compModal = S.compModal || null; S.restSystemTimer = S.restSystemTimer !== false;
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)) } catch (e) { } };
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -712,7 +712,16 @@ function analyzeEx(e) {
   }
   const has = r => r.test(t);
   
-  T.mav = has(/\bm\.?a\.?v\.?\b|maximum\s*acceptable\s*volume|volume\s*massimo\s*accettabile/);
+  // mav / mav5 / m.a.v. 5 / MAV5
+  const mavM = t.match(/\bm\.?a\.?v\.?\s*(\d+(?:[.,]\d+)?)?\b|maximum\s*acceptable\s*volume|volume\s*massimo\s*accettabile/);
+  T.mav = !!mavM;
+  if (mavM && mavM[1]) T.mavReps = parseInt(String(mavM[1]).replace(',', '.'), 10);
+  // 100% del mav / 90% del MAV
+  const pctMav = t.match(/(\d+(?:[.,]\d+)?)\s*%\s*(?:del\s*)?m\.?a\.?v\.?\b/);
+  if (pctMav) {
+    T.pctOfMav = parseFloat(String(pctMav[1]).replace(',', '.'));
+    T.mav = true; // blocchi che dipendono dal MAV
+  }
   T.vbt = has(/\bv\.?b\.?t\.?\b|velocity[ -]?based|speed\s*(?:based|work)|velocit[aà]|\bm\/s\b|\bmetri\/secondo\b/);
   T.e1rm = has(/\be\.?1\.?rm\b|1\s*rm\s*stimato|massimale\s*stimato|estimated\s*1\s*rm/);
   
@@ -721,9 +730,14 @@ function analyzeEx(e) {
   
   T.amrap = has(/\bamrap\b|as\s*many\s*reps|\bmax(?:imum)?\s*reps?\b|massime?\s*ripetizioni|al cedimento|to failure|a cedimento/);
   T.emom = has(/\bemom\b|every minute|ogni minuto/);
-  const cl = t.match(/(\d+(?:\s*\+\s*\d+)+)/);
-  T.cluster = has(/\bcluster\b/) || !!cl;
-  if (cl) T.clusterParts = cl[1].split(/\s*\+\s*/).map(Number);
+  // cluster: solo parola "cluster" o forma 3x(2+2+1) / (2+2+1)
+  const clParen = t.match(/\(\s*(\d+(?:\s*\+\s*\d+){1,})\s*\)/);
+  T.cluster = has(/\bcluster\b/) || !!clParen;
+  if (clParen) T.clusterParts = clParen[1].split(/\s*\+\s*/).map(Number);
+  else if (T.cluster) {
+    const cl2 = t.match(/(\d+(?:\s*\+\s*\d+){1,})/);
+    if (cl2) T.clusterParts = cl2[1].split(/\s*\+\s*/).map(Number);
+  }
   T.restpause = has(/rest[\s-]*pause|\brp\b|myo[\s-]*reps?/);
   T.drop = has(/drop[\s-]*set|\bdrop\b|serie a scalare/);
   T.topset = has(/top[\s-]*set|serie top/);
@@ -751,7 +765,8 @@ function analyzeEx(e) {
   if (em) T.emomMin = parseInt(em[1] || em[2], 10);
   
   if (T.rpe) tag('rpe', T.rpe.txt, 'Autoregolazione: scegli il carico che dia questa fatica (RPE 10 = zero rip di riserva). Aggiungi serie finché lo raggiungi.');
-  if (T.mav) tag('mav', 'MAV', 'Carico da trovare in rampa: aggiungi serie finché arrivi al carico giusto per la variante.');
+  if (T.mav && !T.pctOfMav) tag('mav', 'MAV' + (T.mavReps ? ' ' + T.mavReps : ''), 'Serie MAV: imposta il carico, ripetizioni fisse' + (T.mavReps ? ' a ' + T.mavReps : '') + '.');
+  if (T.pctOfMav) tag('mav', T.pctOfMav + '% del MAV', 'Carico fisso = ' + T.pctOfMav + '% del MAV appena trovato (non modificabile).');
   if (T.vbt) tag('vbt', 'VBT', 'Carico guidato dalla velocità del bilanciere.');
   if (T.e1rm) tag('e1rm', 'e1RM', 'Massimale stimato dalla serie (kg × rip × RPE).');
   if (T.instinct) tag('inst', 'Istintivo', 'Kg e rip liberi: scegli a sensazione.');
@@ -779,15 +794,17 @@ function analyzeEx(e) {
   if (T.block) tag('block', 'A blocchi', 'Periodizzazione che concentra volume e intensità in blocchi successivi.');
   if (T.linear) tag('linear', 'Lineare', 'Progressione graduale del carico e/o riduzione del volume.');
   
-  const ramp = !!(T.rpe || T.mav || T.vbt || T.e1rm || T.topset || T.ramping || T.dailyMax || T.me);
-  T.mode = ramp ? 'ramp' : (T.instinct ? 'free' : 'fixed');
-  T.dynamic = ramp || T.restpause || T.drop || T.amrap || T.backoff;
+  // % del MAV = serie fisse (carico bloccato), non rampa
+  const ramp = !!(T.rpe || (T.mav && !T.pctOfMav) || T.vbt || T.e1rm || T.topset || T.ramping || T.dailyMax || T.me);
+  T.mode = T.pctOfMav ? 'fixed' : (ramp ? 'ramp' : (T.instinct ? 'free' : 'fixed'));
+  T.dynamic = (ramp && !T.pctOfMav) || T.restpause || T.drop || T.amrap || T.backoff;
   return (_techCache[t] = T);
 }
 /** Analizza stringhe miste ("2x2s 70% + 5@7 + istintiva") separandole in configurazioni per serie */
 function parseComplexSets(text, lift) {
   const raw = String(text || '');
-  const parts = raw.split(/\s*;\s*|\s+\+\s+/).filter(x => x.trim());
+  // split: "mav5 + 3x3s 100% del mav" → due blocchi
+  const parts = raw.split(/\s*;\s*|\s+\+\s+/).map(x => x.trim()).filter(Boolean);
   if (!parts.length) parts.push(raw);
 
   let configs = [];
@@ -798,8 +815,81 @@ function parseComplexSets(text, lift) {
     const info = parseSets(part);
     const kgP = prescribedKg(part, lift);
 
+    // --- MAV puro (mav5): 1 serie, kg editabili, rip fisse ---
+    if (T.mav && !T.pctOfMav) {
+      const reps = T.mavReps != null ? T.mavReps : (info.reps != null ? info.reps : null);
+      configs.push({
+        blockIdx: bIdx,
+        partText: part,
+        mode: 'ramp',
+        dynamic: true,
+        role: 'mav',
+        reps: reps,
+        kg: null,
+        kgLocked: false,
+        rpe: T.rpe,
+        T: T,
+        info: { count: 1, reps: reps, mode: 'mav' }
+      });
+      hasDynamic = true; // bottoni +/− sotto al MAV
+      return;
+    }
+
+    // --- % del MAV (es. 3x3s 100% del mav): serie fisse, kg bloccati = % del MAV ---
+    if (T.pctOfMav != null) {
+      let count = info.count || 1;
+      // se "3 serie x 3" senza x classico
+      const sm = part.match(/(\d+)\s*(?:serie|sets?)\s*[x×]?\s*(\d+)?/i);
+      if (sm && !/(\d+)\s*[x×]\s*(\d+)/i.test(part)) {
+        count = parseInt(sm[1], 10) || count;
+        if (sm[2] && info.reps == null) info.reps = parseInt(sm[2], 10);
+      }
+      const reps = info.targets ? null : (info.reps != null ? info.reps : null);
+      for (let i = 0; i < count; i++) {
+        configs.push({
+          blockIdx: bIdx,
+          partText: part,
+          mode: 'fixed',
+          dynamic: false,
+          role: 'mavBackoff',
+          reps: info.targets ? info.targets[i] : reps,
+          kg: null,
+          kgLocked: true,
+          pctOfMav: T.pctOfMav,
+          rpe: T.rpe,
+          T: T,
+          info: info
+        });
+      }
+      return;
+    }
+
     let count = info.count || 1;
-    if (T.dynamic && count === 3 && !info.roles) count = 1; // Rampa standard parte da 1
+    const explicitSets = /(\d+)\s*[x×]\s*(\d+)/i.test(part) || /(\d+)\s*(?:serie|sets?)\b/i.test(part);
+    // rampa senza numero serie esplicito → parti da 1
+    if (T.dynamic && count === 3 && !info.roles && !explicitSets) count = 1;
+
+    // RPE (non MAV): ruolo rpe, serie con rip fisse + kg modificabili
+    if (T.rpe && !T.mav && !T.pctOfMav) {
+      const reps = info.targets ? null : (info.reps != null ? info.reps : null);
+      for (let i = 0; i < count; i++) {
+        configs.push({
+          blockIdx: bIdx,
+          partText: part,
+          mode: 'ramp',
+          dynamic: true,
+          role: 'rpe',
+          reps: info.targets ? info.targets[i] : reps,
+          kg: kgP,
+          kgLocked: false,
+          rpe: T.rpe,
+          T: T,
+          info: info
+        });
+      }
+      hasDynamic = true;
+      return;
+    }
 
     for (let i = 0; i < count; i++) {
       configs.push({
@@ -807,8 +897,10 @@ function parseComplexSets(text, lift) {
         partText: part,
         mode: T.mode,
         dynamic: T.dynamic,
+        role: (info.roles && info.roles[i]) || null,
         reps: info.targets ? info.targets[i] : info.reps,
         kg: kgP,
+        kgLocked: false,
         rpe: T.rpe,
         T: T,
         info: info
@@ -819,7 +911,183 @@ function parseComplexSets(text, lift) {
 
   return { configs, hasDynamic };
 }
+
+/** kg del set MAV (prima serie con ruolo mav o prima con kg > 0 del blocco mav) */
+function getMavKgFromLog(log, configs) {
+  if (!log || !log.sets) return null;
+  let last = null;
+  for (let i = 0; i < log.sets.length; i++) {
+    const cfg = configs && configs[i];
+    const s = log.sets[i];
+    if (cfg && cfg.role === 'mav' && s && s.kg !== '' && s.kg != null) {
+      const v = parseFloat(String(s.kg).replace(',', '.'));
+      if (v > 0) last = v; // ultimo MAV con kg (top della rampa)
+    }
+  }
+  if (last != null) return last;
+  for (const s of log.sets) {
+    if (s && s.kg !== '' && s.kg != null) {
+      const v = parseFloat(String(s.kg).replace(',', '.'));
+      if (v > 0) return v;
+    }
+  }
+  return null;
+}
+/** Espande serie MAV / RPE in base a quante ne ha aggiunte l'utente */
+function buildEffectiveConfigs(complex, log) {
+  const configs = (complex && complex.configs) || [];
+  const mavT = configs.find(c => c.role === 'mav');
+  const rpeT = configs.find(c => c.role === 'rpe');
+  const expandable = mavT || rpeT;
+  if (!expandable) return configs;
+  const role = mavT ? 'mav' : 'rpe';
+  const template = mavT || rpeT;
+  const backoff = configs.filter(c => c.role === 'mavBackoff');
+  const other = configs.filter(c => c.role !== 'mav' && c.role !== 'rpe' && c.role !== 'mavBackoff');
+  const nBo = backoff.length;
+  const nOther = other.length;
+  const nBase = configs.filter(c => c.role === role).length;
+  const total = (log && log.sets && log.sets.length) || configs.length;
+  const nExp = Math.max(nBase, total - nBo - nOther);
+  const out = [];
+  for (let i = 0; i < nExp; i++) out.push(Object.assign({}, template, { role: role }));
+  other.forEach(c => out.push(c));
+  backoff.forEach(c => out.push(c));
+  return out;
+}
+function countExpandableSets(log, complex, role) {
+  const nBo = (complex.configs || []).filter(c => c.role === 'mavBackoff').length;
+  const nOther = (complex.configs || []).filter(c => c.role !== role && c.role !== 'mavBackoff' && c.role !== 'mav' && c.role !== 'rpe').length;
+  // exclude the other expandable type from "other"
+  const nOther2 = (complex.configs || []).filter(c => {
+    if (c.role === 'mavBackoff') return false;
+    if (c.role === role) return false;
+    return true;
+  }).length;
+  return Math.max(1, ((log && log.sets) || []).length - nOther2);
+}
+function countMavSets(log, complex) {
+  return countExpandableSets(log, complex, 'mav');
+}
+function countRpeSets(log, complex) {
+  return countExpandableSets(log, complex, 'rpe');
+}
+function addMavSet(week, day, i) {
+  try { flushSetInputsFromDOM(); } catch (e) {}
+  const wObj = (S.prog && S.prog.weeks.find(x => x.label === week)) || W();
+  if (!wObj) return;
+  const exs = dayExercises(wObj, day);
+  const e = exs && exs[i];
+  if (!e) return;
+  let lift = e.lift;
+  if (!lift && isMainLift(e)) {
+    const n = String(e.name || '').toLowerCase();
+    if (/squat|acconsc/.test(n)) lift = 's';
+    else if (/panca|bench/.test(n)) lift = 'b';
+    else if (/stacco|deadlift|sumo|regular/.test(n)) lift = 'd';
+  }
+  const complex = parseComplexSets(e.text, lift);
+  const mavT = complex.configs.find(c => c.role === 'mav');
+  if (!mavT) {
+    addRampSet(week, day, i);
+    return;
+  }
+  const row = getExLog(week, day, i);
+  const nBo = complex.configs.filter(c => c.role === 'mavBackoff').length;
+  const nOther = complex.configs.filter(c => c.role !== 'mav' && c.role !== 'mavBackoff').length;
+  const insertAt = Math.max(1, row.sets.length - nBo - nOther); // sotto all'ultimo MAV
+  const reps = mavT.reps != null ? String(mavT.reps) : '';
+  row.sets.splice(insertAt, 0, { kg: '', reps: reps, done: false });
+  row.dyn = true;
+  const k = week + '|' + day, a = S.chk[k];
+  if (a && a.indexOf(i) >= 0) a.splice(a.indexOf(i), 1);
+  save();
+  render();
+}
+function removeMavSet(week, day, i) {
+  try { flushSetInputsFromDOM(); } catch (e) {}
+  const wObj = (S.prog && S.prog.weeks.find(x => x.label === week)) || W();
+  if (!wObj) return;
+  const exs = dayExercises(wObj, day);
+  const e = exs && exs[i];
+  if (!e) return;
+  let lift = e.lift;
+  if (!lift && isMainLift(e)) {
+    const n = String(e.name || '').toLowerCase();
+    if (/squat|acconsc/.test(n)) lift = 's';
+    else if (/panca|bench/.test(n)) lift = 'b';
+    else if (/stacco|deadlift|sumo|regular/.test(n)) lift = 'd';
+  }
+  const complex = parseComplexSets(e.text, lift);
+  const row = getExLog(week, day, i);
+  const nBo = complex.configs.filter(c => c.role === 'mavBackoff').length;
+  const nOther = complex.configs.filter(c => c.role !== 'mav' && c.role !== 'mavBackoff').length;
+  const nMav = row.sets.length - nBo - nOther;
+  if (nMav <= 1) return; // tieni almeno 1 MAV
+  row.sets.splice(nMav - 1, 1);
+  syncExerciseDoneFromSets(week, day, i);
+  save();
+  render();
+}
 /** toglie dal testo RPE/RIR/%/tempo che altrimenti verrebbero scambiati per serie (es. "@7-8", "tempo 3-1-0") */
+function addRpeSet(week, day, i) {
+  try { flushSetInputsFromDOM(); } catch (e) {}
+  const wObj = (S.prog && S.prog.weeks.find(x => x.label === week)) || W();
+  if (!wObj) return;
+  const exs = dayExercises(wObj, day);
+  const e = exs && exs[i];
+  if (!e) return;
+  let lift = e.lift;
+  if (!lift && isMainLift(e)) {
+    const n = String(e.name || '').toLowerCase();
+    if (/squat|acconsc/.test(n)) lift = 's';
+    else if (/panca|bench/.test(n)) lift = 'b';
+    else if (/stacco|deadlift|sumo|regular/.test(n)) lift = 'd';
+  }
+  const complex = parseComplexSets(e.text, lift);
+  const rpeT = complex.configs.find(c => c.role === 'rpe');
+  if (!rpeT) {
+    addRampSet(week, day, i);
+    return;
+  }
+  const row = getExLog(week, day, i);
+  const nBo = complex.configs.filter(c => c.role === 'mavBackoff').length;
+  const nOther = complex.configs.filter(c => c.role !== 'rpe' && c.role !== 'mavBackoff').length;
+  const insertAt = Math.max(1, row.sets.length - nBo - nOther);
+  const reps = rpeT.reps != null ? String(rpeT.reps) : '';
+  row.sets.splice(insertAt, 0, { kg: '', reps: reps, rpe: '', done: false });
+  row.dyn = true;
+  const k = week + '|' + day, a = S.chk[k];
+  if (a && a.indexOf(i) >= 0) a.splice(a.indexOf(i), 1);
+  save();
+  render();
+}
+function removeRpeSet(week, day, i) {
+  try { flushSetInputsFromDOM(); } catch (e) {}
+  const wObj = (S.prog && S.prog.weeks.find(x => x.label === week)) || W();
+  if (!wObj) return;
+  const exs = dayExercises(wObj, day);
+  const e = exs && exs[i];
+  if (!e) return;
+  let lift = e.lift;
+  if (!lift && isMainLift(e)) {
+    const n = String(e.name || '').toLowerCase();
+    if (/squat|acconsc/.test(n)) lift = 's';
+    else if (/panca|bench/.test(n)) lift = 'b';
+    else if (/stacco|deadlift|sumo|regular/.test(n)) lift = 'd';
+  }
+  const complex = parseComplexSets(e.text, lift);
+  const row = getExLog(week, day, i);
+  const nBo = complex.configs.filter(c => c.role === 'mavBackoff').length;
+  const nOther = complex.configs.filter(c => c.role !== 'rpe' && c.role !== 'mavBackoff').length;
+  const nRpe = row.sets.length - nBo - nOther;
+  if (nRpe <= 1) return;
+  row.sets.splice(nRpe - 1, 1);
+  syncExerciseDoneFromSets(week, day, i);
+  save();
+  render();
+}
+
 function stripNoise(text) {
   const N = '\\d+(?:[.,]\\d+)?', RG = '(?:\\s*[-–\\/]\\s*' + N + ')?';
   return String(text || '')
@@ -923,6 +1191,21 @@ function parseSets(text) {
   const T = analyzeEx({ name: '', text: raw });
   const t = stripNoise(raw);
   let m;
+  // MAV5 / mav 5: 1 serie, rip fisse
+  if (T.mav && !T.pctOfMav) {
+    const reps = T.mavReps != null ? T.mavReps : null;
+    return { count: 1, targets: null, reps: reps, mode: 'mav' };
+  }
+  // 3x3 100% del mav → conta le serie dal pattern x
+  if (T.pctOfMav != null) {
+    m = t.match(/(\d+)\s*[x×]\s*(\d+)\s*s\b/i);
+    if (m) return { count: parseInt(m[2], 10) || 3, targets: null, reps: parseInt(m[1], 10) };
+    m = t.match(/(\d+)\s*[x×]\s*(\d+)/i);
+    if (m) return { count: parseInt(m[1], 10) || 3, targets: null, reps: parseInt(m[2], 10) };
+    m = t.match(/(\d+)\s*(?:serie|sets?)\b/i);
+    if (m) return { count: parseInt(m[1], 10) || 3, targets: null, reps: T.mavReps || null };
+    return { count: 3, targets: null };
+  }
   // EMOM N minuti → N serie
   if (T.emom && T.emomMin) {
     const r = t.match(/(\d+)\s*(?:rip|reps?)\b/i);
@@ -965,8 +1248,11 @@ function parseSets(text) {
   return { count: T.mode === 'ramp' ? 1 : 3, targets: null };
 }
 function prescribedKg(text, lift) {
+  const raw = String(text || '');
+  // MAV / % del MAV: non usare il massimale
+  if (/\bm\.?a\.?v\.?\b/i.test(raw)) return null;
   if (!lift || !S.max || !S.max[lift]) return null;
-  const m = String(text || '').match(/(\d+(?:[.,]\d+)?)\s*%/);
+  const m = raw.match(/(\d+(?:[.,]\d+)?)\s*%/);
   if (!m) return null;
   const pct = parseFloat(m[1].replace(',', '.'));
   if (isNaN(pct)) return null;
@@ -1374,8 +1660,29 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
   const info = parseSets(exercise.text);
   const T = analyzeEx(exercise);
   const prevInfo = (!exercise.warm && !main) ? prefillAccessoryFromPrev(weekLabel, day, exIndex, exercise) : null;
+  const hasMav = complex.configs.some(c => c.role === 'mav');
+  const hasRpeRole = complex.configs.some(c => c.role === 'rpe');
   const log = getExLog(weekLabel, day, exIndex, complex.configs.length || info.count);
-  if (complex.hasDynamic) log.dyn = true;
+  if (complex.hasDynamic || hasMav || hasRpeRole) log.dyn = true;
+  // allinea lunghezza: MAV extra già in log
+  const eff0 = buildEffectiveConfigs(complex, log);
+  while (log.sets.length < eff0.length) log.sets.push({ kg: '', reps: '', done: false });
+  // precompila rip fisse (MAV / % del MAV)
+  eff0.forEach((cfg, i) => {
+    if (!log.sets[i]) return;
+    if (cfg.reps != null && (log.sets[i].reps === '' || log.sets[i].reps == null)) {
+      log.sets[i].reps = String(cfg.reps);
+    }
+    if (cfg.kgLocked && cfg.role === 'mavBackoff') {
+      const mavKg = getMavKgFromLog(log, eff0);
+      const pct = cfg.pctOfMav;
+      if (mavKg != null && pct != null) {
+        const kg = Math.round(mavKg * pct / 100 / 2.5) * 2.5;
+        if (log.sets[i].kg === '' || log.sets[i].kg == null) log.sets[i].kg = String(kg);
+      }
+    }
+  });
+  const effConfigs = buildEffectiveConfigs(complex, log);
 
   const sugKg = (T.backoffPct || T.mav) ? null : prescribedKg(exercise.text, lift);
   const est = sugKg != null ? sugKg : rpeTargetKg(T, info.reps != null ? info.reps : (info.targets && info.targets[0]), lift);
@@ -1388,22 +1695,40 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
   return `<div class="sets-wrap ${allLocked ? 'sets-locked' : ''} ${mono ? 'sets-mono' : ''}">
     ${T.mode === 'ramp' ? rampHeaderHtml(T, info, log, est, lift) : (T.mode === 'free' ? '<p class="ramp-info">Istintivo: kg e rip liberi, scegli a sensazione</p>' : '')}
     ${log.sets.map((s, si) => {
-      const c = complex.configs[si] || complex.configs[complex.configs.length - 1] || {};
+      const c = effConfigs[si] || effConfigs[effConfigs.length - 1] || {};
       const cT = c.T || T;
       const cInfo = c.info || info;
       const mode = c.mode || 'fixed';
       
-      const prescRep = c.reps != null ? c.reps : null;
-      const prescKg = c.kg != null ? c.kg : null;
+      let prescRep = c.reps != null ? c.reps : null;
+      if (prescRep == null && (c.role === 'mav' || (c.T && c.T.mavReps != null && !c.T.pctOfMav))) {
+        prescRep = (c.T && c.T.mavReps != null) ? c.T.mavReps : (T.mavReps != null ? T.mavReps : null);
+      }
+      let prescKg = c.kg != null ? c.kg : null;
+      // 100% del MAV → kg dalla serie MAV
+      if ((c.role === 'mavBackoff' || c.pctOfMav != null || (c.T && c.T.pctOfMav != null)) && prescKg == null) {
+        const mavKg = getMavKgFromLog(log, complex.configs);
+        const pct = c.pctOfMav != null ? c.pctOfMav : (c.T && c.T.pctOfMav);
+        if (mavKg != null && pct != null) prescKg = Math.round(mavKg * pct / 100 / 2.5) * 2.5;
+      }
 
-      const isLocked = main && mode === 'fixed';
-      // Rende bloccate le ripetizioni se scritte (come in "5@7")
-      const repsEditable = !main || mode === 'free' || (mode === 'ramp' && prescRep == null);
+      const isMav = !!(c.role === 'mav' || ((cT.mav || T.mav) && !cT.pctOfMav && c.role !== 'mavBackoff' && c.role !== 'rpe'));
+      const isRpe = c.role === 'rpe' || (!isMav && !!(cT.rpe || T.rpe) && mode === 'ramp' && c.role !== 'mavBackoff');
+      const isMavBo = c.role === 'mavBackoff' || c.pctOfMav != null || cT.pctOfMav != null;
+      const pctMav = c.pctOfMav != null ? c.pctOfMav : cT.pctOfMav;
+      // kg bloccato su % del MAV; MAV/RPE: kg libero; fixed main: tutto bloccato
+      const isLocked = isMavBo || (main && mode === 'fixed' && !isMav && !isRpe);
+      // MAV e RPE: rip sempre fisse se prescritte (es. 3x3 RPE 7 → 3 rip)
+      const repsEditable = (isMav || isMavBo || (isRpe && prescRep != null))
+        ? false
+        : (!main || mode === 'free' || (mode === 'ramp' && prescRep == null));
 
-      const roleLbl = (cInfo.roles && cInfo.roles[si] === 'top' ? ' · Top set' : cInfo.roles && cInfo.roles[si] === 'backoff' ? ' · Back-off' : '')
-        + (mode === 'ramp' && !cInfo.roles && si >= (cInfo.count || 1) ? ' · extra' : '')
-        + (mode === 'ramp' && cT.rpe && rpeOf(s) != null && rpeOf(s) >= cT.rpe.lo ? ' · target ✓' : '')
-        + (complex.configs.length > 1 && c.partText ? ' · ' + esc(c.partText) : '');
+      const roleLbl = (isMav ? ' · MAV' + (prescRep != null ? ' ' + prescRep : '') : '')
+        + (isRpe ? ' · ' + (cT.rpe ? cT.rpe.txt : 'RPE') + (prescRep != null ? ' · ' + prescRep + ' rip' : '') : '')
+        + (isMavBo ? ' · ' + (pctMav != null ? pctMav + '% del MAV' : 'del MAV') : '')
+        + (cInfo.roles && cInfo.roles[si] === 'top' ? ' · Top set' : cInfo.roles && cInfo.roles[si] === 'backoff' ? ' · Back-off' : '')
+        + (mode === 'ramp' && !cInfo.roles && !isMav && si >= (cInfo.count || 1) ? ' · extra' : '')
+        + (mode === 'ramp' && cT.rpe && rpeOf(s) != null && rpeOf(s) >= cT.rpe.lo ? ' · target ✓' : '');
 
       const isDone = !!s.done;
       let inputs = '';
@@ -1430,15 +1755,31 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
         const repShow = (s.reps !== '' && s.reps != null) ? String(s.reps) + ' rip' : (prescRep != null ? String(prescRep) + ' rip' : '— rip');
         inputs = `<div class="set-readonly set-done-ro"><span class="set-ro-kg">${esc(kgShow)}</span><span class="set-x">×</span><span class="set-ro-reps">${esc(repShow + (rpeOf(s) != null ? ' @' + String(rpeOf(s)).replace('.', ',') : ''))}</span></div><p class="set-lock-hint">Serie fatta · tocca la card per sbloccare</p>`;
       } else if (isLocked) {
-        const kgLabel = prescKg != null ? String(prescKg).replace('.', ',') + ' kg' : '— kg';
+        const kgLabel = prescKg != null ? String(prescKg).replace('.', ',') + ' kg'
+          : (isMavBo ? (pctMav != null ? pctMav + '% del MAV' : 'dopo MAV') : '— kg');
         const repLabel = prescRep != null ? String(prescRep) + ' rip' : '— rip';
-        inputs = `<div class="set-readonly"><span class="set-ro-kg">${esc(kgLabel)}</span><span class="set-x">×</span><span class="set-ro-reps">${esc(repLabel)}</span></div><p class="set-lock-hint">Fisso dalla scheda (fondamentale)</p>`;
+        const hint = isMavBo
+          ? (prescKg != null ? 'Fisso: ' + (pctMav != null ? pctMav + '% del MAV' : 'del MAV') : 'Inserisci prima i kg del MAV')
+          : 'Fisso dalla scheda (fondamentale)';
+        inputs = `<div class="set-readonly"><span class="set-ro-kg">${esc(kgLabel)}</span><span class="set-x">×</span><span class="set-ro-reps">${esc(repLabel)}</span></div><p class="set-lock-hint">${esc(hint)}</p>`;
+      } else if (isMav) {
+        // MAV puro: kg sì · rip fisse = numero del MAV (mav5 → 5)
+        const kgVal = s.kg != null && s.kg !== '' ? esc(String(s.kg)) : '';
+        const fixedRep = prescRep != null ? String(prescRep) : '—';
+        // forza rip nel log
+        if (prescRep != null && (s.reps === '' || s.reps == null)) s.reps = String(prescRep);
+        inputs = `<div class="set-inputs set-rpe">
+             <input type="number" inputmode="decimal" step="0.5" placeholder="kg" value="${kgVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
+             <span class="set-x">×</span>
+             <span class="set-ro-reps set-ro-inline">${esc(fixedRep)} rip</span>
+           </div>
+           <p class="set-lock-hint">MAV ${prescRep != null ? prescRep : ''} · kg modificabili · ripetizioni fisse</p>`;
       } else if (mode === 'ramp') {
         const kgVal = s.kg != null && s.kg !== '' ? esc(String(s.kg)) : '';
-        const repVal = s.reps != null && s.reps !== '' ? esc(String(s.reps)) : (!repsEditable && prescRep != null ? prescRep : '');
+        const repVal = s.reps != null && s.reps !== '' ? esc(String(s.reps)) : (!repsEditable && prescRep != null ? String(prescRep) : '');
         const rpeVal = s.rpe != null && s.rpe !== '' ? esc(String(s.rpe)) : '';
         const ph = rampPlaceholder(cT, cInfo, log, si, (prescKg != null ? prescKg : est));
-        const roRepAttr = !repsEditable && prescRep != null ? 'readonly class="ro-input" tabindex="-1"' : '';
+        const roRepAttr = !repsEditable ? 'readonly class="ro-input" tabindex="-1"' : '';
         
         inputs = `<div class="set-inputs set-ramp">
              <input type="number" inputmode="decimal" step="0.5" placeholder="${esc(ph)}" value="${kgVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
@@ -1453,10 +1794,10 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
         const prevHint = pSet && ((pSet.kg !== '' && pSet.kg != null) || (pSet.reps !== '' && pSet.reps != null)) ? `<p class="set-prev-hint">Scorsa (${esc(String(prevInfo.week))}): <b>${pSet.kg !== '' && pSet.kg != null ? esc(String(pSet.kg)) + ' kg' : '—'} × ${pSet.reps !== '' && pSet.reps != null ? esc(String(pSet.reps)) + ' rip' : '—'}</b> · cerca di migliorare</p>` : '';
         const fromPrev = prevSetKg(log, si);
         const kgVal = s.kg != null && s.kg !== '' ? esc(String(s.kg)) : '';
-        const repVal = s.reps != null && s.reps !== '' ? esc(String(s.reps)) : (!repsEditable && prescRep != null ? prescRep : '');
+        const repVal = s.reps != null && s.reps !== '' ? esc(String(s.reps)) : (!repsEditable && prescRep != null ? String(prescRep) : '');
         const kgPh = fromPrev ? String(fromPrev) : 'kg';
         const suggestNote = fromPrev && (s.kg === '' || s.kg == null) ? `<p class="set-prev-hint">Suggerito serie prec.: <b>${esc(String(fromPrev))} kg</b> (placeholder)</p>` : '';
-        const roRepAttr = !repsEditable && prescRep != null ? 'readonly class="ro-input" tabindex="-1"' : '';
+        const roRepAttr = !repsEditable ? 'readonly class="ro-input" tabindex="-1"' : '';
 
         inputs = `<div class="set-inputs">
              <input type="number" inputmode="decimal" step="0.5" placeholder="${esc(kgPh)}" value="${kgVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
@@ -1472,8 +1813,29 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
         </div>
         ${inputs}
       </div>`;
-    }).join('')}
-    ${complex.hasDynamic && !mono ? `<div class="ramp-actions"><button type="button" onclick='addRampSet(${wJs},${day},${exIndex})'>＋ Aggiungi serie</button>${log.sets.length > 1 ? `<button type="button" onclick='removeLastSet(${wJs},${day},${exIndex})'>− Togli ultima</button>` : ''}</div>` : ''}
+    }).reduce((acc, html, si) => {
+      acc.push(html);
+      const cfg = effConfigs[si];
+      const next = effConfigs[si + 1];
+      // bottoni +/− sotto l'ultimo set MAV
+      if (hasMav && cfg && cfg.role === 'mav' && (!next || next.role !== 'mav') && !mono) {
+        const nMav = countMavSets(log, complex);
+        acc.push(`<div class="ramp-actions mav-actions">
+          <button type="button" onclick='addMavSet(${wJs},${day},${exIndex})'>＋ Aggiungi serie MAV</button>
+          ${nMav > 1 ? `<button type="button" onclick='removeMavSet(${wJs},${day},${exIndex})'>− Togli ultima MAV</button>` : ''}
+        </div>`);
+      }
+      // bottoni +/− sotto l'ultimo set RPE
+      if (hasRpeRole && cfg && cfg.role === 'rpe' && (!next || next.role !== 'rpe') && !mono) {
+        const nRpe = countRpeSets(log, complex);
+        acc.push(`<div class="ramp-actions rpe-actions">
+          <button type="button" onclick='addRpeSet(${wJs},${day},${exIndex})'>＋ Aggiungi serie RPE</button>
+          ${nRpe > 1 ? `<button type="button" onclick='removeRpeSet(${wJs},${day},${exIndex})'>− Togli ultima RPE</button>` : ''}
+        </div>`);
+      }
+      return acc;
+    }, []).join('')}
+    ${!hasMav && complex.hasDynamic && !mono ? `<div class="ramp-actions"><button type="button" onclick='addRampSet(${wJs},${day},${exIndex})'>＋ Aggiungi serie</button>${log.sets.length > 1 ? `<button type="button" onclick='removeLastSet(${wJs},${day},${exIndex})'>− Togli ultima</button>` : ''}</div>` : ''}
   </div>`;
 }
 /** secondi → "HH:MM:SS" per input type=time */
@@ -1605,7 +1967,36 @@ async function notifyRestDone(name) {
     }
   } catch (e) {}
 }
+function isIosDevice() {
+  try {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  } catch (e) { return false; }
+}
+/** Apre Comandi Rapidi "Recupero PL" con i secondi come input → Timer di sistema iPhone */
+function openSystemRestTimer(sec, ev) {
+  if (ev) { try { ev.stopPropagation(); ev.preventDefault(); } catch (e) {} }
+  sec = Math.max(15, Math.min(600, parseInt(sec, 10) || 120));
+  // Shortcut: riceve testo (secondi) → Avvia timer
+  const name = encodeURIComponent('Recupero PL');
+  const text = encodeURIComponent(String(sec));
+  const url = 'shortcuts://run-shortcut?name=' + name + '&input=text&text=' + text;
+  try {
+    // salva per ripresa
+    try { localStorage.setItem('powerapp_rest_ends', String(Date.now() + sec * 1000)); } catch (e) {}
+    window.location.href = url;
+  } catch (e) {
+    alert('Impossibile aprire Comandi. Crea lo shortcut "Recupero PL" (vedi istruzioni nel Piano).');
+  }
+}
 function onRestFinished() {
+  if (_restTimer && _restTimer._done) return;
+  if (_restTimer) _restTimer._done = true;
+  if (_restTimer && _restTimer._iv) {
+    clearInterval(_restTimer._iv);
+    _restTimer._iv = null;
+  }
+  try { localStorage.removeItem('powerapp_rest_ends'); } catch (e) {}
   playRestBeep();
   try { if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 400]); } catch (e) {}
   notifyRestDone(_restTimer && _restTimer.name);
@@ -1615,6 +2006,8 @@ function onRestFinished() {
   if (bar) bar.classList.add('done');
   const btn = document.querySelector('.rest-stop');
   if (btn) btn.textContent = 'Chiudi';
+  // se la barra non c'è (pagina non renderizzata), forza un render
+  if (!el) { try { render(); } catch (e) {} }
 }
 function startRest(name, ev) {
   if (ev) { try { ev.stopPropagation(); ev.preventDefault(); } catch (e) {} }
@@ -1623,9 +2016,12 @@ function startRest(name, ev) {
     clearInterval(_restTimer._iv);
     _restTimer._iv = null;
   }
-  _restTimer = { endsAt: Date.now() + sec * 1000, name: String(name || ''), left: sec };
+  const endsAt = Date.now() + sec * 1000;
+  _restTimer = { endsAt: endsAt, name: String(name || ''), left: sec, _done: false };
+  try { localStorage.setItem('powerapp_rest_ends', String(endsAt)); localStorage.setItem('powerapp_rest_name', String(name || '')); } catch (e) {}
+
   const tick = () => {
-    if (!_restTimer) return;
+    if (!_restTimer || _restTimer._done) return;
     _restTimer.left = Math.max(0, Math.ceil((_restTimer.endsAt - Date.now()) / 1000));
     const el = document.getElementById('rest-timer-display');
     if (el) {
@@ -1644,12 +2040,62 @@ function startRest(name, ev) {
   _restTimer._iv = setInterval(tick, 200);
   render();
   tick();
+
+  // iPhone: offri / apri timer di sistema (funziona a schermo spento)
+  if (isIosDevice() && S.restSystemTimer) {
+    // leggero delay così il render completa, poi chiede conferma
+    setTimeout(() => {
+      const ok = confirm(
+        'Timer recupero ' + fmtRest(sec) + '\n\n' +
+        'Su iPhone le notifiche web non suonano se il telefono è bloccato.\n\n' +
+        'OK = apri il Timer di sistema (Comandi "Recupero PL")\n' +
+        'Annulla = solo timer nell\'app'
+      );
+      if (ok) openSystemRestTimer(sec);
+    }, 80);
+  }
 }
 function stopRest(ev) {
   if (ev) { try { ev.stopPropagation(); ev.preventDefault(); } catch (e) {} }
   if (_restTimer && _restTimer._iv) clearInterval(_restTimer._iv);
   _restTimer = null;
+  try { localStorage.removeItem('powerapp_rest_ends'); localStorage.removeItem('powerapp_rest_name'); } catch (e) {}
   render();
+}
+/** Se torni in app dopo background, completa il timer se scaduto */
+function resumeRestTimerIfNeeded() {
+  try {
+    const ends = parseInt(localStorage.getItem('powerapp_rest_ends') || '', 10);
+    if (!ends) return;
+    const left = Math.ceil((ends - Date.now()) / 1000);
+    const name = localStorage.getItem('powerapp_rest_name') || '';
+    if (left <= 0) {
+      if (!_restTimer) _restTimer = { endsAt: ends, name: name, left: 0, _done: false };
+      else { _restTimer.endsAt = ends; _restTimer.left = 0; }
+      onRestFinished();
+      return;
+    }
+    // riprendi conteggio se perso (JS sospeso)
+    if (!_restTimer || !_restTimer._iv) {
+      _restTimer = { endsAt: ends, name: name, left: left, _done: false };
+      const tick = () => {
+        if (!_restTimer || _restTimer._done) return;
+        _restTimer.left = Math.max(0, Math.ceil((_restTimer.endsAt - Date.now()) / 1000));
+        const el = document.getElementById('rest-timer-display');
+        if (el && _restTimer.left > 0) {
+          const m = Math.floor(_restTimer.left / 60), s = _restTimer.left % 60;
+          el.textContent = m + ':' + String(s).padStart(2, '0');
+        }
+        if (_restTimer.left <= 0) {
+          if (_restTimer._iv) { clearInterval(_restTimer._iv); _restTimer._iv = null; }
+          onRestFinished();
+        }
+      };
+      _restTimer._iv = setInterval(tick, 200);
+      render();
+      tick();
+    }
+  } catch (e) {}
 }
 function restBarHtml() {
   if (!_restTimer) return '';
@@ -1657,10 +2103,15 @@ function restBarHtml() {
   const m = Math.floor(left / 60);
   const s = left % 60;
   const done = left <= 0;
+  const sec = Math.max(15, left > 0 ? left : (getRestSec(_restTimer.name) || 120));
+  const iosBtn = isIosDevice() && !done
+    ? `<button type="button" class="rest-sys" onclick="openSystemRestTimer(${sec}, event)" title="Timer iPhone">Timer iPhone</button>`
+    : '';
   return `<div class="rest-bar ${done ? 'done' : ''}" id="rest-bar">
     <div class="rest-bar-inner">
       <span class="rest-label">Recupero · ${esc(_restTimer.name)}</span>
       <span id="rest-timer-display" class="rest-time ${done ? 'done' : ''}">${done ? 'Fine!' : (m + ':' + String(s).padStart(2, '0'))}</span>
+      ${iosBtn}
       <button type="button" class="rest-stop" onclick="stopRest(event)">${done ? 'Chiudi' : 'Stop'}</button>
     </div>
   </div>`;
@@ -1771,6 +2222,7 @@ function fmt(text, lift) {
   return esc(text).replace(/(\d+)\s*x\s*(\d+)\s*s\b|(\d+(?:[.,]\d+)?)\s*%(\s+del\s+\S+)?|@(\d+(?:[.,]\d+)?(?:\s*[-–]\s*\d+(?:[.,]\d+)?)?)| (\d+(?:-\d+){2,})\b/gi, (m, a, b, p, rel, r, seq, off, str) => {
     if (a) return `<span class="sr"><span class="n-serie">${b}</span> serie × <span class="n-rip">${a}</span> rip</span>`;
     if (p) {
+      if (/%\s*(?:del\s*)?mav/i.test(text)) return `<span class="rel">${p}% del MAV</span>`;
       if (rel || mav || !lift) return `<span class="rel">${p}%${rel || ''} non del massimale</span>`;
       const kg = Math.round(parseFloat(p.replace(',', '.')) / 100 * S.max[lift] / 2.5) * 2.5;
       return `${p}% <span class="kg">${String(kg).replace('.', ',')} kg</span>`
@@ -2726,6 +3178,22 @@ function piano() {
     <p class="mut" style="margin-bottom:12px">Promemoria ogni mattina alle ~7:00. Su iPhone: aggiungi l'app alla Home Screen da Safari, poi attiva qui.</p>
     ${pushBtn}
   </div>
+  <h1>Timer recupero (iPhone)</h1>
+  <div class="card">
+    <p class="mut" style="margin-bottom:10px">Su iPhone il timer web si ferma a schermo spento. Usa il <b>Timer di sistema</b> tramite Comandi Rapidi: suona anche se sei su un’altra app.</p>
+    <button type="button" class="${S.restSystemTimer !== false ? 'pri' : ''}" onclick="S.restSystemTimer=!(S.restSystemTimer!==false);save();render()">
+      ${S.restSystemTimer !== false ? '✓ Chiedi Timer iPhone all’avvio recupero' : 'Chiedi Timer iPhone all’avvio recupero'}
+    </button>
+    <p class="mut" style="margin-top:12px;font-size:13px;line-height:1.45">
+      <b>Setup una tantum (1 minuto):</b><br>
+      1. Apri <b>Comandi</b> (Shortcuts)<br>
+      2. Nuovo comando, nome esatto: <b>Recupero PL</b><br>
+      3. Aggiungi azione <b>Avvia timer</b> (Start Timer)<br>
+      4. Durata → <b>Variabile</b> → <b>Input del comando</b> (come secondi)<br>
+      5. Se chiede unità, usa secondi o calcola Input÷60 per minuti<br>
+      6. Salva. All’avvio recupero tocca OK e parte il timer di sistema.
+    </p>
+  </div>
   <h1>Settimane</h1>${S.prog.weeks.map((w, i) => `${makeEditCard(w.label)}<div class="wk ${i === S.wi ? 'cur' : ''} ${S.dayEdit && S.dayEdit.week === w.label ? 'wk-editing' : ''}" onclick="S.wi=${i};save();render()"><div class="wk-top"><b>${esc(w.label)}</b><button class="res-btn" onclick="resetWk('${w.label}', event)">❌</button></div>${weekDots(w)}</div>`).join('')}
   <p class="mut">Tocca un giorno (Lun–Dom) per impostare allenamento o riposo. Rosso = allenamento · blu = riposo · grigio = non registrato.</p>
   <h1>Nuova scheda</h1><div class="card"><label class="btn" style="margin:0;cursor:pointer">🔄 Cambia file della scheda<input type="file" accept=".docx" style="display:none" onchange="imp(this)"></label><p id="err" class="mut"></p></div>`;
@@ -2941,6 +3409,8 @@ rebuildPianoFromStorico();
 render();
 // Espone funzioni usate dagli onclick inline (iOS / strict)
 window.startRest = startRest;
+window.resumeRestTimerIfNeeded = resumeRestTimerIfNeeded;
+window.openSystemRestTimer = openSystemRestTimer;
 window.stopRest = stopRest;
 window.openRestPicker = openRestPicker;
 window.closeRestPicker = closeRestPicker;
@@ -2955,6 +3425,10 @@ window.markSetDone = markSetDone;
 window.markSideDone = markSideDone;
 window.setExSideLog = setExSideLog;
 window.cascadeMonoKgFromSet = cascadeMonoKgFromSet;
+window.addMavSet = addMavSet;
+window.removeMavSet = removeMavSet;
+window.addRpeSet = addRpeSet;
+window.removeRpeSet = removeRpeSet;
 window.exportWorkoutCsv = exportWorkoutCsv;
 window.cancelPianoSession = cancelPianoSession;
 window.savePianoSession = savePianoSession;
