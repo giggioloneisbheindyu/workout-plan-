@@ -3,6 +3,7 @@ let S = {};
 try { S = JSON.parse(localStorage.getItem(KEY)) || {} } catch (e) { }
 S.max = S.max || { s: 210, b: 110, d: 265 }; S.done = S.done || {}; S.chk = S.chk || {}; S.wi = S.wi || 0; S.view = S.view || 'oggi'; S.time = S.time || '17:00'; S.pushOn = S.pushOn || false; S.weekLog = S.weekLog || {}; S.promptedDate = S.promptedDate || null; S.dayModal = S.dayModal || null; S.accLog = S.accLog || {}; S.liftHistory = S.liftHistory || {}; S.restByEx = S.restByEx || {}; S.restDefault = S.restDefault || 120; S.restPicker = S.restPicker || null; S.workoutLog = S.workoutLog || []; S.progCatalog = S.progCatalog || []; S.pianoSession = S.pianoSession || null;
 S.compModal = S.compModal || null; S.restSystemTimer = S.restSystemTimer !== false;
+S.exNotes = S.exNotes || {}; S.nextLoad = S.nextLoad || {};
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)) } catch (e) { } };
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -413,6 +414,7 @@ function savePianoSession() {
     exs.forEach((e, i) => {
       if (!e.warm) markAllSetsDone(week.label, d, i, true);
     });
+    saveSessionLogs(week.label, d, exs);
     logFinishedWorkout(week.label, d, ps.wd);
   } else {
     clearCal(ps.week, ps.wd);
@@ -436,7 +438,9 @@ function pianoSessionHtml() {
   const ac = AC[(Number(d) - 1) % 4];
   const list = ex.map((e, i) => {
     const acc = isAccessory(e);
-    const setsBlock = !e.warm ? setsLogHtml(week.label, d, i, e) : '';
+    const hist = !e.warm ? historyHtml(e.name) : '';
+    const noteBlock = exNoteAndNextLoadHtml(week.label, d, i, e);
+    const setsBlock = !e.warm ? (setsLogHtml(week.label, d, i, e) + hist + noteBlock) : '';
     return `<div class="ex ${e.warm ? 'w' : ''} ${e.lift ? 'main' : ''} ${acc ? 'acc' : ''} ${ck.includes(i) ? 'ok' : ''}">
       <div class="n" onclick="tg(${i})" role="button">${ck.includes(i) ? '✓' : (i + 1)}</div>
       <div class="ex-body">
@@ -462,7 +466,7 @@ function pianoSessionHtml() {
 }
 /* ===== Complementari: popup tabella + CSV Hevy ===== */
 let _compCsv = null; // allenamenti letti dal CSV (solo in memoria)
-const compEmptyRow = () => ({ name: '', sets: '', reps: '', kg: '' });
+const compEmptyRow = () => ({ name: '', sets: '', reps: '', kg: '', note: '', incNext: false, nextKg: '', nextNote: '' });
 function openCompModal(source, week, wd) {
   S.dayModal = null; S.dayEdit = null; S.restPicker = null; _compCsv = null;
   S.compModal = { source, week, wd, csvIdx: 0, rows: [compEmptyRow(), compEmptyRow(), compEmptyRow()] };
@@ -475,9 +479,54 @@ function compSync() {
   const rows = [];
   document.querySelectorAll('#comp-modal tr.comp-row').forEach(tr => {
     const v = c => (tr.querySelector('[data-c="' + c + '"]') || {}).value || '';
-    rows.push({ name: v('name'), sets: v('sets'), reps: v('reps'), kg: v('kg') });
+    const noteTr = tr.nextElementSibling;
+    const noteV = c => (noteTr && noteTr.querySelector('[data-c="' + c + '"]') ? noteTr.querySelector('[data-c="' + c + '"]').value : '');
+    const incNext = noteTr && noteTr.querySelector('[data-c="incNext"]') ? noteTr.querySelector('[data-c="incNext"]').checked : false;
+    rows.push({
+      name: v('name'),
+      sets: v('sets'),
+      reps: v('reps'),
+      kg: v('kg'),
+      note: noteV('note'),
+      incNext: incNext,
+      nextKg: noteV('nextKg'),
+      nextNote: noteV('nextNote')
+    });
   });
   if (rows.length) S.compModal.rows = rows;
+}
+function compOnNameChange(i, name) {
+  compSync();
+  if (!S.compModal || !S.compModal.rows[i]) return;
+  const r = S.compModal.rows[i];
+  r.name = name;
+  const planned = name ? getPlannedLoad(name, S.compModal.week, S.compModal.wd) : null;
+  if (planned && planned.kg != null && (r.kg === '' || r.kg == null)) {
+    r.kg = String(planned.kg);
+  }
+  save(); render();
+}
+function compApplyPlannedKg(i, kg) {
+  compSync();
+  if (!S.compModal || !S.compModal.rows[i]) return;
+  S.compModal.rows[i].kg = String(kg);
+  save(); render();
+}
+function compToggleNext(i, checkbox) {
+  const checked = typeof checkbox === 'boolean' ? checkbox : checkbox.checked;
+  if (!S.compModal || !S.compModal.rows[i]) return;
+  S.compModal.rows[i].incNext = checked;
+  const el = document.getElementById('comp-next-inputs-' + i);
+  if (el) {
+    el.classList.toggle('hidden', !checked);
+    if (checked) {
+      const kgInp = el.querySelector('input[data-c="nextKg"]');
+      if (kgInp) setTimeout(() => kgInp.focus(), 50);
+    }
+  }
+  if (checkbox && checkbox.closest) {
+    checkbox.closest('.comp-inc-label')?.classList.toggle('active', checked);
+  }
 }
 function compAddRow() { compSync(); S.compModal.rows.push(compEmptyRow()); save(); render(); }
 function compDelRow(i) {
@@ -497,8 +546,22 @@ function compRowsToExercises(rows) {
     const reps = parseInt(r.reps, 10);
     const sets = Array.from({ length: n }, () => ({ kg: isNaN(kg) ? null : kg, reps: isNaN(reps) ? null : reps, done: true }));
     const last = out[out.length - 1];
-    if (last && liftKey(last.name) === liftKey(name)) sets.forEach(s => last.sets.push(s));
-    else out.push({ name, warm: false, main: false, text: '', done: true, sets });
+    const nextKg = (r.incNext && r.nextKg !== '') ? parseFloat(String(r.nextKg).replace(',', '.')) : null;
+    if (last && liftKey(last.name) === liftKey(name)) {
+      sets.forEach(s => last.sets.push(s));
+    } else {
+      out.push({
+        name,
+        warm: false,
+        main: false,
+        text: '',
+        done: true,
+        sets,
+        note: String(r.note || '').trim(),
+        nextKg: !isNaN(nextKg) ? nextKg : null,
+        nextNote: String(r.nextNote || '').trim()
+      });
+    }
   });
   out.forEach(e => e.sets.forEach((s, i) => { s.n = i + 1; }));
   return out;
@@ -514,7 +577,12 @@ function saveCompModal(empty) {
   const entry = S.workoutLog[0];
   entry.exercises = exs;
   entry.fromPiano = !exs.length;
-  exs.forEach(e => pushLiftHistory(e.name, e.sets, week, 'comp'));
+  exs.forEach(e => {
+    if (e.nextKg != null) {
+      setNextLoadPlan(e.name, true, e.nextKg, e.nextNote);
+    }
+    pushLiftHistory(e.name, e.sets, week, 'comp', e.nextKg, e.nextNote, e.note);
+  });
   rebuildPianoFromStorico();
   if (wd === weekdayMon0() && W() && week === W().label) {
     S.today = { date: dstr(), type: 'rest', finished: 1, week, day: 'comp' };
@@ -595,13 +663,40 @@ function compModalHtml() {
   const m = S.compModal;
   if (!m) return '';
   const names = [...new Set(((S.prog && S.prog.weeks) || []).flatMap(w => Object.values(w.days || {}).flat()).filter(isAccessory).map(e => e.name))];
-  const rows = m.rows.map((r, i) => `<tr class="comp-row">
-    <td><input type="text" data-c="name" list="comp-names" placeholder="Esercizio" value="${esc(r.name)}"></td>
+  const rows = m.rows.map((r, i) => {
+    const planned = r.name ? getPlannedLoad(r.name, m.week, m.wd) : null;
+    let plannedHint = '';
+    if (planned && planned.kg != null) {
+      plannedHint = `<div class="comp-planned-hint">📌 Programmato: <b>${esc(String(planned.kg))} kg</b>${planned.note ? ' — ' + esc(planned.note) : ''} <button type="button" class="comp-apply-btn" onclick="compApplyPlannedKg(${i}, ${planned.kg})">Usa</button></div>`;
+    }
+    const nextChecked = r.incNext ? 'checked' : '';
+    const nextHidden = r.incNext ? '' : 'hidden';
+    return `<tr class="comp-row">
+    <td>
+      <input type="text" data-c="name" list="comp-names" placeholder="Esercizio" value="${esc(r.name)}" onchange="compOnNameChange(${i}, this.value)">
+      ${plannedHint}
+    </td>
     <td><input type="number" inputmode="numeric" data-c="sets" placeholder="Serie" value="${esc(r.sets)}"></td>
     <td><input type="number" inputmode="numeric" data-c="reps" placeholder="Rep" value="${esc(r.reps)}"></td>
-    <td><input type="text" inputmode="decimal" data-c="kg" placeholder="Kg" value="${esc(r.kg)}"></td>
+    <td><input type="text" inputmode="decimal" data-c="kg" placeholder="${planned ? esc(String(planned.kg)) : 'Kg'}" value="${esc(r.kg)}"></td>
     <td><button type="button" class="comp-del" onclick="compDelRow(${i})" aria-label="Elimina riga">✕</button></td>
-  </tr>`).join('');
+  </tr>
+  <tr class="comp-note-row">
+    <td colspan="5">
+      <input type="text" class="comp-note-input" data-c="note" placeholder="Note su ${esc(r.name || 'questo esercizio')}…" value="${esc(r.note || '')}">
+      <div class="comp-next-wrap">
+        <label class="comp-inc-label ${nextChecked ? 'active' : ''}">
+          <input type="checkbox" data-c="incNext" ${nextChecked} onchange="compToggleNext(${i}, this)">
+          <span>Aumentare carico la prossima volta?</span>
+        </label>
+        <div class="comp-next-inputs ${nextHidden}" id="comp-next-inputs-${i}">
+          <input type="number" step="0.5" inputmode="decimal" data-c="nextKg" placeholder="Nuovo kg (es. 25)" value="${esc(String(r.nextKg != null ? r.nextKg : ''))}">
+          <input type="text" data-c="nextNote" placeholder="Nota per la prossima volta (facoltativa)" value="${esc(r.nextNote || '')}">
+        </div>
+      </div>
+    </td>
+  </tr>`;
+  }).join('');
   const picker = _compCsv && _compCsv.length > 1
     ? `<label class="mut" style="font-size:12px">Allenamento nel CSV</label>
        <select class="comp-sel" onchange="compUseCsv(+this.value)">${_compCsv.map((w, i) => `<option value="${i}" ${i === m.csvIdx ? 'selected' : ''}>${esc(w.date.slice(0, 16))} · ${esc(w.title || 'Allenamento')} (${w.exs.length} es.)</option>`).join('')}</select>`
@@ -1588,27 +1683,31 @@ function findPrevAccessorySets(exerciseName, currentWeek, day) {
  */
 function prefillAccessoryFromPrev(weekLabel, day, exIndex, exercise) {
   if (!exercise || exercise.warm || isMainLift(exercise)) return null;
+  const planned = getPlannedLoad(exercise.name, weekLabel, day);
   const prev = findPrevAccessorySets(exercise.name, weekLabel, day);
-  if (!prev || !prev.sets || !prev.sets.length) return null;
   const info = parseSets(exercise.text);
   const log = getExLog(weekLabel, day, exIndex, info.count);
   let changed = false;
   log.sets.forEach((s, si) => {
-    const p = prev.sets[si] || prev.sets[Math.min(si, prev.sets.length - 1)];
-    if (!p) return;
-    if ((s.kg === '' || s.kg == null) && p.kg !== '' && p.kg != null) {
-      s.kg = p.kg;
-      changed = true;
+    const p = (prev && prev.sets) ? (prev.sets[si] || prev.sets[Math.min(si, prev.sets.length - 1)]) : null;
+    if (s.kg === '' || s.kg == null) {
+      if (planned && planned.kg != null) {
+        s.kg = String(planned.kg);
+        changed = true;
+      } else if (p && p.kg !== '' && p.kg != null) {
+        s.kg = p.kg;
+        changed = true;
+      }
     }
-    if ((s.reps === '' || s.reps == null) && p.reps !== '' && p.reps != null) {
+    if ((s.reps === '' || s.reps == null) && p && p.reps !== '' && p.reps != null) {
       s.reps = p.reps;
       changed = true;
     }
   });
   if (changed) save();
-  return prev;
+  return prev || (planned ? { week: planned.week, sets: [{ kg: planned.kg }] } : null);
 }
-function pushLiftHistory(name, sets, week, day) {
+function pushLiftHistory(name, sets, week, day, optNextKg, optNextNote, optNote) {
   const clean = (sets || []).map(s => ({
     kg: parseFloat(String(s.kg).replace(',', '.')),
     reps: parseInt(s.reps, 10)
@@ -1617,13 +1716,43 @@ function pushLiftHistory(name, sets, week, day) {
   const key = liftKey(name);
   S.liftHistory = S.liftHistory || {};
   S.liftHistory[key] = S.liftHistory[key] || [];
-  S.liftHistory[key] = S.liftHistory[key].filter(h => h.date !== dstr());
-  S.liftHistory[key].unshift({ date: dstr(), sets: clean, week: week || '', day: day });
+  S.liftHistory[key] = S.liftHistory[key].filter(h => h.date !== dstr() || (week && h.week !== week));
+  const entry = { date: dstr(), sets: clean, week: week || '', day: day };
+  const nk = (optNextKg != null) ? { kg: optNextKg, note: optNextNote || '' } : getNextLoadPlan(name, week, day);
+  if (nk && nk.kg != null) {
+    entry.nextKg = nk.kg;
+    entry.nextNote = nk.note || '';
+  }
+  if (optNote) {
+    entry.note = optNote;
+  }
+  S.liftHistory[key].unshift(entry);
   if (S.liftHistory[key].length > 40) S.liftHistory[key].length = 40;
 }
 function lastLiftHistory(name, n) {
   const list = (S.liftHistory && S.liftHistory[liftKey(name)]) || [];
   return list.slice(0, n || 5);
+}
+/** Trova il carico pianificato per la prossima volta dallo storico precedente */
+function getPlannedLoad(name, currentWeek, currentDay) {
+  const hist = lastLiftHistory(name, 15);
+  for (const h of hist) {
+    const isSame = (currentWeek && h.week === currentWeek && (currentDay == null || h.day == currentDay));
+    if (!isSame && h.nextKg != null) {
+      return { kg: h.nextKg, note: h.nextNote || '', date: h.date, week: h.week, day: h.day };
+    }
+  }
+  for (const w of (S.workoutLog || [])) {
+    const isSame = (currentWeek && w.week === currentWeek && (currentDay == null || w.day == currentDay));
+    if (!isSame && w.exercises) {
+      for (const e of w.exercises) {
+        if (liftKey(e.name) === liftKey(name) && e.nextKg != null) {
+          return { kg: e.nextKg, note: e.nextNote || '', date: w.date, week: w.week, day: w.day };
+        }
+      }
+    }
+  }
+  return null;
 }
 function historyHtml(name) {
   const rows = lastLiftHistory(name, 4);
@@ -1631,7 +1760,9 @@ function historyHtml(name) {
   return '<div class="hist">' + rows.map(h => {
     const sets = h.sets || (h.kg != null ? [{ kg: h.kg, reps: h.reps }] : []);
     const txt = sets.map(s => s.kg + '×' + s.reps).join(', ');
-    return `<span class="hist-row"><b>${esc(txt)}</b> <i>${esc(String(h.date || '')).slice(5)}</i></span>`;
+    const nxt = h.nextKg != null ? ` <span class="hist-next">→ ${h.nextKg} kg</span>` : '';
+    const noteTxt = h.note ? ` <span class="hist-note-badge" title="${esc(h.note)}">📝</span>` : '';
+    return `<span class="hist-row"><b>${esc(txt)}</b>${nxt}${noteTxt} <i>${esc(String(h.date || '')).slice(5)}</i></span>`;
   }).join('') + '</div>';
 }
 function saveSessionLogs(week, day, exercises) {
@@ -1648,6 +1779,10 @@ function saveSessionLogs(week, day, exercises) {
     const complex = parseComplexSets(e.text, lift);
     const log = getExLog(week, day, i, complex.configs.length);
     const effC = buildEffectiveConfigs(complex, log);
+    const exNote = getExNote(week, day, i);
+    const nextPlan = isAccessory(e) ? getNextLoadPlan(e.name, week, day) : null;
+    const nextKg = nextPlan && nextPlan.kg != null ? nextPlan.kg : null;
+    const nextNote = nextPlan && nextPlan.note || '';
 
     if (isMainLift(e)) {
       const sets = log.sets.map((s, si) => {
@@ -1663,12 +1798,162 @@ function saveSessionLogs(week, day, exercises) {
           done: s.done,
         };
       });
-      pushLiftHistory(e.name, sets, week, day);
+      pushLiftHistory(e.name, sets, week, day, nextKg, nextNote, exNote);
     } else {
-      pushLiftHistory(e.name, log.sets, week, day);
+      pushLiftHistory(e.name, log.sets, week, day, nextKg, nextNote, exNote);
     }
   });
   save();
+}
+/* ===== Note per esercizi e pianificazione carico prossima sessione ===== */
+function getExNoteKey(week, day, i) { return week + '|' + day + '|' + i; }
+function getExNote(week, day, i) {
+  return (S.exNotes && S.exNotes[getExNoteKey(week, day, i)]) || '';
+}
+function setExNote(week, day, i, text) {
+  S.exNotes = S.exNotes || {};
+  S.exNotes[getExNoteKey(week, day, i)] = String(text || '');
+  save();
+}
+function getNextLoadKey(exerciseName, week, day) {
+  if (week != null && day != null) {
+    return week + '|' + day + '|' + liftKey(exerciseName);
+  }
+  return liftKey(exerciseName);
+}
+function getNextLoadPlan(exerciseName, week, day) {
+  if (!S.nextLoad) return null;
+  if (week != null && day != null) {
+    const specific = S.nextLoad[getNextLoadKey(exerciseName, week, day)];
+    if (specific) return specific;
+  }
+  return S.nextLoad[liftKey(exerciseName)] || null;
+}
+function setNextLoadPlan(exerciseName, increase, kg, note, week, day) {
+  S.nextLoad = S.nextLoad || {};
+  const specificKey = (week != null && day != null) ? getNextLoadKey(exerciseName, week, day) : null;
+  const generalKey = liftKey(exerciseName);
+  
+  if (!increase) {
+    if (specificKey) delete S.nextLoad[specificKey];
+    delete S.nextLoad[generalKey];
+  } else {
+    const obj = { kg: parseFloat(String(kg || 0).replace(',', '.')) || null, note: note || '' };
+    if (specificKey) S.nextLoad[specificKey] = obj;
+    S.nextLoad[generalKey] = obj;
+  }
+  save();
+}
+function onToggleNextLoad(checkbox) {
+  const section = checkbox.closest('.next-load-section');
+  if (!section) return;
+  const exName = section.dataset.ex;
+  const week = section.dataset.week;
+  const day = section.dataset.day;
+  const form = section.querySelector('.next-load-form');
+  const checked = checkbox.checked;
+  checkbox.closest('.next-load-toggle')?.classList.toggle('active', checked);
+  
+  if (!checked) {
+    setNextLoadPlan(exName, false, 0, '', week, day);
+    if (form) form.classList.add('hidden');
+  } else {
+    if (form) {
+      form.classList.remove('hidden');
+      const kgInp = form.querySelector('input[type=number]');
+      const noteInp = form.querySelector('.next-load-note-input');
+      const kg = kgInp ? kgInp.value : '';
+      const note = noteInp ? noteInp.value : '';
+      if (kg) setNextLoadPlan(exName, true, kg, note, week, day);
+      if (kgInp) setTimeout(() => kgInp.focus(), 50);
+    }
+  }
+}
+
+function onNextLoadInputsChange(input) {
+  const section = input.closest('.next-load-section');
+  if (!section) return;
+  const exName = section.dataset.ex;
+  const week = section.dataset.week;
+  const day = section.dataset.day;
+  const form = section.querySelector('.next-load-form');
+  if (!form) return;
+  const kgInp = form.querySelector('input[type=number]');
+  const noteInp = form.querySelector('.next-load-note-input');
+  const kg = kgInp ? kgInp.value : '';
+  const note = noteInp ? noteInp.value : '';
+  setNextLoadPlan(exName, true, kg, note, week, day);
+}
+
+function applyPlannedLoadToSets(weekLabel, day, exIndex, kg) {
+  const log = getExLog(weekLabel, day, exIndex);
+  if (!log || !log.sets) return;
+  log.sets.forEach(s => {
+    s.kg = String(kg);
+  });
+  save();
+  render();
+}
+
+function exNoteAndNextLoadHtml(weekLabel, day, exIndex, exercise) {
+  if (!exercise || exercise.warm) return '';
+  const wJs = JSON.stringify(weekLabel);
+  const note = getExNote(weekLabel, day, exIndex);
+  const isAcc = isAccessory(exercise);
+
+  let plannedBanner = '';
+  let nextLoadSection = '';
+
+  if (isAcc) {
+    const plan = getNextLoadPlan(exercise.name, weekLabel, day);
+    const planned = getPlannedLoad(exercise.name, weekLabel, day);
+    const planKg = plan && plan.kg != null ? plan.kg : '';
+    const planNote = plan && plan.note ? plan.note : '';
+    const planChecked = plan ? 'checked' : '';
+    const activeClass = plan ? 'active' : '';
+
+    if (planned && planned.kg != null) {
+      plannedBanner = `<div class="planned-load-banner">
+        <span class="planned-load-icon">📌</span>
+        <div class="planned-load-text">
+          <span>Avevi programmato <b>${esc(String(planned.kg))} kg</b> per questa sessione</span>
+          ${planned.note ? `<span class="planned-note-hint"> — ${esc(planned.note)}</span>` : ''}
+        </div>
+        <button type="button" class="planned-apply-btn" onclick='applyPlannedLoadToSets(${wJs}, ${day}, ${exIndex}, ${planned.kg})'>Applica a tutte</button>
+      </div>`;
+    }
+
+    nextLoadSection = `<div class="next-load-section" data-ex="${esc(exercise.name)}" data-week="${esc(weekLabel)}" data-day="${esc(String(day))}">
+      <label class="next-load-toggle ${activeClass}">
+        <input type="checkbox" ${planChecked} onchange="onToggleNextLoad(this)">
+        <span class="toggle-pill-text">Aumentare carico la prossima volta?</span>
+      </label>
+      <div class="next-load-form ${plan ? '' : 'hidden'}">
+        <div class="next-load-inputs">
+          <label>Prossimo carico (kg)
+            <input type="number" inputmode="decimal" step="0.5" placeholder="es. 102.5" value="${esc(String(planKg))}"
+              oninput="onNextLoadInputsChange(this)"
+              onchange="onNextLoadInputsChange(this)">
+          </label>
+          <label>Nota (facoltativa)
+            <input type="text" class="next-load-note-input" placeholder="es. provare con cintura" value="${esc(planNote)}"
+              oninput="onNextLoadInputsChange(this)"
+              onchange="onNextLoadInputsChange(this)">
+          </label>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  return `<div class="ex-notes-wrap">
+    ${plannedBanner}
+    <div class="ex-note-field">
+      <textarea class="ex-note-input" placeholder="Note per questo esercizio…" rows="2"
+        oninput="setExNote(${wJs},${day},${exIndex},this.value)"
+        onchange="setExNote(${wJs},${day},${exIndex},this.value)">${esc(note)}</textarea>
+    </div>
+    ${nextLoadSection}
+  </div>`;
 }
 /** HTML card per ogni serie */
 function setsLogHtml(weekLabel, day, exIndex, exercise) {
@@ -2060,14 +2345,8 @@ function onRestFinished() {
   playRestBeep();
   try { if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 400]); } catch (e) {}
   notifyRestDone(_restTimer && _restTimer.name);
-  const el = document.getElementById('rest-timer-display');
-  if (el) { el.textContent = 'Fine!'; el.classList.add('done'); }
-  const bar = document.querySelector('.rest-bar');
-  if (bar) bar.classList.add('done');
-  const btn = document.querySelector('.rest-stop');
-  if (btn) btn.textContent = 'Chiudi';
-  // se la barra non c'è (pagina non renderizzata), forza un render
-  if (!el) { try { render(); } catch (e) {} }
+  _restTimer = null;
+  try { localStorage.removeItem('powerapp_rest_name'); } catch (e) {}
 }
 function startRest(name, ev) {
   if (ev) { try { ev.stopPropagation(); ev.preventDefault(); } catch (e) {} }
@@ -2080,42 +2359,33 @@ function startRest(name, ev) {
   _restTimer = { endsAt: endsAt, name: String(name || ''), left: sec, _done: false };
   try { localStorage.setItem('powerapp_rest_ends', String(endsAt)); localStorage.setItem('powerapp_rest_name', String(name || '')); } catch (e) {}
 
+  // Feedback visivo sul pulsante premuto
+  if (ev && ev.currentTarget) {
+    const btn = ev.currentTarget;
+    const oldText = btn.textContent;
+    btn.textContent = 'Avviato ✓';
+    btn.classList.add('started');
+    setTimeout(() => {
+      btn.textContent = oldText;
+      btn.classList.remove('started');
+    }, 1500);
+  }
+
   const tick = () => {
     if (!_restTimer || _restTimer._done) return;
     _restTimer.left = Math.max(0, Math.ceil((_restTimer.endsAt - Date.now()) / 1000));
-    const el = document.getElementById('rest-timer-display');
-    if (el) {
-      if (_restTimer.left > 0) {
-        const m = Math.floor(_restTimer.left / 60);
-        const s = _restTimer.left % 60;
-        el.textContent = m + ':' + String(s).padStart(2, '0');
-        el.classList.remove('done');
-      }
-    }
     if (_restTimer.left <= 0) {
       if (_restTimer._iv) { clearInterval(_restTimer._iv); _restTimer._iv = null; }
       onRestFinished();
     }
   };
   _restTimer._iv = setInterval(tick, 200);
-  render();
   tick();
 
   // iPhone: avvia subito il Timer di sistema (Comandi "Recupero PL")
   if (isIosDevice() && S.restSystemTimer !== false) {
     setTimeout(() => openSystemRestTimer(sec), 60);
   }
-}
-function stopRest(ev) {
-  if (ev) { try { ev.stopPropagation(); ev.preventDefault(); } catch (e) {} }
-  if (_restTimer && _restTimer._iv) clearInterval(_restTimer._iv);
-  _restTimer = null;
-  try { localStorage.removeItem('powerapp_rest_ends'); localStorage.removeItem('powerapp_rest_name'); } catch (e) {}
-  // ferma anche il timer di sistema iPhone
-  if (isIosDevice() && S.restSystemTimer !== false) {
-    setTimeout(() => openSystemRestTimer('stop'), 40);
-  }
-  render();
 }
 /** Se torni in app dopo background, completa il timer se scaduto */
 function resumeRestTimerIfNeeded() {
@@ -2125,46 +2395,26 @@ function resumeRestTimerIfNeeded() {
     const left = Math.ceil((ends - Date.now()) / 1000);
     const name = localStorage.getItem('powerapp_rest_name') || '';
     if (left <= 0) {
-      if (!_restTimer) _restTimer = { endsAt: ends, name: name, left: 0, _done: false };
-      else { _restTimer.endsAt = ends; _restTimer.left = 0; }
       onRestFinished();
       return;
     }
-    // riprendi conteggio se perso (JS sospeso)
     if (!_restTimer || !_restTimer._iv) {
       _restTimer = { endsAt: ends, name: name, left: left, _done: false };
       const tick = () => {
         if (!_restTimer || _restTimer._done) return;
         _restTimer.left = Math.max(0, Math.ceil((_restTimer.endsAt - Date.now()) / 1000));
-        const el = document.getElementById('rest-timer-display');
-        if (el && _restTimer.left > 0) {
-          const m = Math.floor(_restTimer.left / 60), s = _restTimer.left % 60;
-          el.textContent = m + ':' + String(s).padStart(2, '0');
-        }
         if (_restTimer.left <= 0) {
           if (_restTimer._iv) { clearInterval(_restTimer._iv); _restTimer._iv = null; }
           onRestFinished();
         }
       };
       _restTimer._iv = setInterval(tick, 200);
-      render();
       tick();
     }
   } catch (e) {}
 }
 function restBarHtml() {
-  if (!_restTimer) return '';
-  const left = Math.max(0, _restTimer.left | 0);
-  const m = Math.floor(left / 60);
-  const s = left % 60;
-  const done = left <= 0;
-  return `<div class="rest-bar ${done ? 'done' : ''}" id="rest-bar">
-    <div class="rest-bar-inner">
-      <span class="rest-label">Recupero · ${esc(_restTimer.name)}</span>
-      <span id="rest-timer-display" class="rest-time ${done ? 'done' : ''}">${done ? 'Fine!' : (m + ':' + String(s).padStart(2, '0'))}</span>
-      <button type="button" class="rest-stop" onclick="stopRest(event)">${done ? 'Chiudi' : 'Stop'}</button>
-    </div>
-  </div>`;
+  return '';
 }
 function fmtRest(sec) {
   sec = Math.max(0, parseInt(sec, 10) || 0);
@@ -2547,6 +2797,8 @@ function logFinishedWorkout(weekLabel, day, weekdayOverride) {
           };
         });
       }
+      const exNote = getExNote(weekLabel, day, i);
+      const nextPlan = isAccessory(e) ? getNextLoadPlan(e.name, weekLabel, day) : null;
       return {
         name: e.name,
         warm: !!e.warm,
@@ -2554,6 +2806,9 @@ function logFinishedWorkout(weekLabel, day, weekdayOverride) {
         text: e.text || '',
         done: ck.includes(i) || (sets && sets.some(x => x.done)),
         sets: sets,
+        note: exNote || '',
+        nextKg: nextPlan && nextPlan.kg != null ? nextPlan.kg : null,
+        nextNote: nextPlan && nextPlan.note || '',
       };
     }),
   };
@@ -2746,7 +3001,8 @@ function renderTrainSession(week, day) {
           <button type="button" class="rest-set" data-ex="${esc(e.name)}" onclick='openRestPicker(${nmJs}, event)'>Tempo</button>
         </div>`
       : '';
-    const setsBlock = !e.warm ? (setsLogHtml(week.label, d, i, e) + hist) : '';
+    const noteBlock = exNoteAndNextLoadHtml(week.label, d, i, e);
+    const setsBlock = !e.warm ? (setsLogHtml(week.label, d, i, e) + hist + noteBlock) : '';
     return `<div class="ex ${e.warm ? 'w' : ''} ${e.lift ? 'main' : ''} ${acc ? 'acc' : ''} ${ck.includes(i) ? 'ok' : ''}">
       <div class="n" onclick="tg(${i})" role="button">${ck.includes(i) ? '✓' : (i + 1)}</div>
       <div class="ex-body">
@@ -2761,8 +3017,7 @@ function renderTrainSession(week, day) {
     </div>`;
   }).join('');
 
-  return `${restBarHtml()}
-  <div class="train-wrap" style="--ac:${ac}">
+  return `<div class="train-wrap" style="--ac:${ac}">
     <div class="hero">
       <div class="mut">${esc(week.label)} · GIORNO ${d}</div>
       <p class="big">${focus(week, d)}</p>
@@ -3149,9 +3404,13 @@ function storico() {
       } else {
         setsHtml = `<p class="mut hist-nosets">Nessun carico registrato</p>`;
       }
+      let noteHtml = '';
+      if (e.note) noteHtml += `<div class="hist-ex-note"><span class="hist-note-icon">📝</span> ${esc(e.note)}</div>`;
+      if (e.nextKg != null) noteHtml += `<div class="hist-ex-next"><span class="hist-next-icon">📌</span> Prossima volta: <b>${esc(String(e.nextKg))} kg</b>${e.nextNote ? ' — ' + esc(e.nextNote) : ''}</div>`;
       return `<div class="hist-ex-block ${e.done ? 'ok' : ''}">
         <div class="hist-ex-name">${e.done ? '✓ ' : ''}${esc(e.name)}</div>
         ${setsHtml}
+        ${noteHtml}
       </div>`;
     }).join('');
     const dayLabel = w.day === 'comp' ? 'Complementari' : ('Giorno ' + w.day);
@@ -3461,7 +3720,6 @@ render();
 window.startRest = startRest;
 window.resumeRestTimerIfNeeded = resumeRestTimerIfNeeded;
 window.openSystemRestTimer = openSystemRestTimer;
-window.stopRest = stopRest;
 window.openRestPicker = openRestPicker;
 window.closeRestPicker = closeRestPicker;
 window.adjustRestPicker = adjustRestPicker;
@@ -3489,6 +3747,15 @@ window.savePianoSession = savePianoSession;
 window.pianoSaveWithLoads = pianoSaveWithLoads;
 window.pianoSaveEmpty = pianoSaveEmpty;
 window.importWorkoutCsvFile = importWorkoutCsvFile;
+window.setExNote = setExNote;
+window.setNextLoadPlan = setNextLoadPlan;
+window.onToggleNextLoad = onToggleNextLoad;
+window.onNextLoadInputsChange = onNextLoadInputsChange;
+window.applyPlannedLoadToSets = applyPlannedLoadToSets;
+window.compOnNameChange = compOnNameChange;
+window.compApplyPlannedKg = compApplyPlannedKg;
+window.compToggleNext = compToggleNext;
+window.getPlannedLoad = getPlannedLoad;
 /* ========== Push Notifications ========== */
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
