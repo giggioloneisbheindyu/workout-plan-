@@ -305,7 +305,7 @@ const clearCal = (weekLabel, wd = weekdayMon0()) => {
 const weekDots = (w) => {
   const log = (S.weekLog && S.weekLog[w.label]) || {};
   const labelEsc = String(w.label).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-  return `<div class="wdays">${[0,1,2,3,4,5,6].map(i => {
+  return `<div class="wdays">${[0, 1, 2, 3, 4, 5, 6].map(i => {
     const t = logType(log[i]);
     const cls = t === 'train' ? 'train' : t === 'rest' ? 'rest' : '';
     const dnum = logDayNum(log[i]);
@@ -400,7 +400,7 @@ function cancelPianoSession() {
   render();
 }
 function savePianoSession() {
-  try { flushSetInputsFromDOM(); } catch (e) {}
+  try { flushSetInputsFromDOM(); } catch (e) { }
   const ps = S.pianoSession;
   if (!ps) return;
   const week = (S.prog && S.prog.weeks.find(x => x.label === ps.week)) || W();
@@ -806,7 +806,7 @@ function analyzeEx(e) {
     }
   }
   const has = r => r.test(t);
-  
+
   // mav / mav5 / m.a.v. 5 / MAV5
   const mavM = t.match(/\bm\.?a\.?v\.?\s*(\d+(?:[.,]\d+)?)?\b|maximum\s*acceptable\s*volume|volume\s*massimo\s*accettabile/);
   T.mav = !!mavM;
@@ -819,10 +819,10 @@ function analyzeEx(e) {
   }
   T.vbt = has(/\bv\.?b\.?t\.?\b|velocity[ -]?based|speed\s*(?:based|work)|velocit[aà]|\bm\/s\b|\bmetri\/secondo\b/);
   T.e1rm = has(/\be\.?1\.?rm\b|1\s*rm\s*stimato|massimale\s*stimato|estimated\s*1\s*rm/);
-  
+
   // Modificato per NON attivarsi se preceduto da "no" (es. "no var istintiva")
   T.instinct = has(/(?<!no\s*(?:var\s*)?)(?:istintiv|a sensazione|\bfeeling\b|autoregol|a piacere|a piacimento|\binstinctive\b|carico\s*libero|ripetizioni\s*libere)/);
-  
+
   T.amrap = has(/\bamrap\b|as\s*many\s*reps|\bmax(?:imum)?\s*reps?\b|massime?\s*ripetizioni|al cedimento|to failure|a cedimento/);
   T.emom = has(/\bemom\b|every minute|ogni minuto/);
   // cluster: solo parola "cluster" o forma 3x(2+2+1) / (2+2+1)
@@ -858,7 +858,7 @@ function analyzeEx(e) {
   T.linear = has(/periodizzazion[ei]\s*lineare|\blineare\b|linear\s*periodization|linear\s*periodised/);
   const em = t.match(/emom\s*(\d+)|(\d+)\s*(?:min|')\s*emom/);
   if (em) T.emomMin = parseInt(em[1] || em[2], 10);
-  
+
   if (T.rpe) tag('rpe', T.rpe.txt, 'Autoregolazione: scegli il carico che dia questa fatica (RPE 10 = zero rip di riserva). Aggiungi serie finché lo raggiungi.');
   if (T.mav && !T.pctOfMav) tag('mav', 'MAV' + (T.mavReps ? ' ' + T.mavReps : ''), 'Serie MAV: imposta il carico, ripetizioni fisse' + (T.mavReps ? ' a ' + T.mavReps : '') + '.');
   if (T.pctOfMav) tag('mav', T.pctOfMav + '% del MAV', 'Carico fisso = ' + T.pctOfMav + '% del MAV appena trovato (non modificabile).');
@@ -888,7 +888,7 @@ function analyzeEx(e) {
   if (T.dup) tag('dup', 'DUP', 'Periodizzazione ondulata giornaliera.');
   if (T.block) tag('block', 'A blocchi', 'Periodizzazione che concentra volume e intensità in blocchi successivi.');
   if (T.linear) tag('linear', 'Lineare', 'Progressione graduale del carico e/o riduzione del volume.');
-  
+
   // % del MAV = serie fisse (carico bloccato), non rampa
   const ramp = !!(T.rpe || (T.mav && !T.pctOfMav) || T.vbt || T.e1rm || T.topset || T.ramping || T.dailyMax || T.me);
   T.mode = T.pctOfMav ? 'fixed' : (ramp ? 'ramp' : (T.instinct ? 'free' : 'fixed'));
@@ -1151,7 +1151,7 @@ function blockExLift(e) {
 }
 /** Aggiunge (delta=+1) o toglie (delta=-1) una serie al SOLO blocco indicato */
 function changeBlockSets(week, day, i, blockIdx, delta) {
-  try { flushSetInputsFromDOM(); } catch (e) {}
+  try { flushSetInputsFromDOM(); } catch (e) { }
   const wObj = (S.prog && S.prog.weeks.find(x => x.label === week)) || W();
   if (!wObj) return;
   const exs = dayExercises(wObj, day);
@@ -1233,7 +1233,7 @@ function techBadgesHtml(e) {
   if (!e || e.warm) return '';
   const T = analyzeEx(e);
   if (!T.tags.length) return '';
-  const primaryKeys = ['rpe','mav','vbt','inst','e1rm','amrap','emom','cl','rp','top','bo','wave','ramp','dm','me','de'];
+  const primaryKeys = ['rpe', 'mav', 'vbt', 'inst', 'e1rm', 'amrap', 'emom', 'cl', 'rp', 'top', 'bo', 'wave', 'ramp', 'dm', 'me', 'de'];
   const primary = T.tags.find(t => primaryKeys.includes(t.k)) || T.tags[0];
   const rest = T.tags.filter(t => t !== primary);
   const modeText = T.mode === 'free' ? 'SERIE LIBERA' : T.mode === 'ramp' ? 'SERIE AUTOREGOLATA' : 'VARIANTE TECNICA';
@@ -1438,7 +1438,7 @@ function cascadeKgFromSet(week, day, i, setIdx) {
         inp.classList.add('kg-suggested');
       }
     });
-  } catch (e) {}
+  } catch (e) { }
 }
 function prevSetKg(log, setIdx) {
   if (!log || !log.sets) return '';
@@ -1500,7 +1500,7 @@ function cascadeMonoKgFromSet(week, day, i, setIdx, side) {
         }
       });
     });
-  } catch (e) {}
+  } catch (e) { }
 }
 /** Salva kg/rip dai campi input PRIMA di un re-render (altrimenti si perdono) */
 function flushSetInputsFromDOM() {
@@ -1793,8 +1793,8 @@ function saveSessionLogs(week, day, exercises) {
         const autoM = mode !== 'fixed';
 
         return {
-          kg: (autoM && s.kg !== '' && s.kg != null) ? parseFloat(String(s.kg).replace(',','.')) || prescKg : (prescKg != null ? prescKg : parseFloat(String(s.kg).replace(',','.'))),
-          reps: (autoM && s.reps !== '' && s.reps != null) ? parseInt(s.reps,10) || prescRep : (prescRep != null ? prescRep : parseInt(s.reps,10)),
+          kg: (autoM && s.kg !== '' && s.kg != null) ? parseFloat(String(s.kg).replace(',', '.')) || prescKg : (prescKg != null ? prescKg : parseFloat(String(s.kg).replace(',', '.'))),
+          reps: (autoM && s.reps !== '' && s.reps != null) ? parseInt(s.reps, 10) || prescRep : (prescRep != null ? prescRep : parseInt(s.reps, 10)),
           done: s.done,
         };
       });
@@ -1833,7 +1833,7 @@ function setNextLoadPlan(exerciseName, increase, kg, note, week, day) {
   S.nextLoad = S.nextLoad || {};
   const specificKey = (week != null && day != null) ? getNextLoadKey(exerciseName, week, day) : null;
   const generalKey = liftKey(exerciseName);
-  
+
   if (!increase) {
     if (specificKey) delete S.nextLoad[specificKey];
     delete S.nextLoad[generalKey];
@@ -1853,7 +1853,7 @@ function onToggleNextLoad(checkbox) {
   const form = section.querySelector('.next-load-form');
   const checked = checkbox.checked;
   checkbox.closest('.next-load-toggle')?.classList.toggle('active', checked);
-  
+
   if (!checked) {
     setNextLoadPlan(exName, false, 0, '', week, day);
     if (form) form.classList.add('hidden');
@@ -1964,7 +1964,7 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
     else if (/panca|bench/.test(n)) lift = 'b';
     else if (/stacco|deadlift|sumo|regular/.test(n)) lift = 'd';
   }
-  
+
   const complex = parseComplexSets(exercise.text, lift);
   const main = isMainLift(exercise);
   const allLocked = main && complex.configs.every(c => c.mode === 'fixed');
@@ -2009,96 +2009,96 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
   return `<div class="sets-wrap ${allLocked ? 'sets-locked' : ''} ${mono ? 'sets-mono' : ''}">
     ${multiBlock ? '' : (T.mode === 'ramp' ? rampHeaderHtml(T, info, log, est, lift) : (T.mode === 'free' ? '<p class="ramp-info">Istintivo: kg e rip liberi, scegli a sensazione</p>' : ''))}
     ${log.sets.map((s, si) => {
-      const c = effConfigs[si] || effConfigs[effConfigs.length - 1] || {};
-      const cT = c.T || T;
-      const cInfo = c.info || info;
-      const mode = c.mode || 'fixed';
-      
-      let prescRep = c.reps != null ? c.reps : null;
-      if (prescRep == null && (c.role === 'mav' || (c.T && c.T.mavReps != null && !c.T.pctOfMav))) {
-        prescRep = (c.T && c.T.mavReps != null) ? c.T.mavReps : (T.mavReps != null ? T.mavReps : null);
-      }
-      let prescKg = c.kg != null ? c.kg : null;
-      // 100% del MAV → kg dalla serie MAV
-      if ((c.role === 'mavBackoff' || c.pctOfMav != null || (c.T && c.T.pctOfMav != null)) && prescKg == null) {
-        const mavKg = getMavKgFromLog(log, complex.configs);
-        const pct = c.pctOfMav != null ? c.pctOfMav : (c.T && c.T.pctOfMav);
-        if (mavKg != null && pct != null) prescKg = Math.round(mavKg * pct / 100 / 2.5) * 2.5;
-      }
+    const c = effConfigs[si] || effConfigs[effConfigs.length - 1] || {};
+    const cT = c.T || T;
+    const cInfo = c.info || info;
+    const mode = c.mode || 'fixed';
 
-      const isMav = !!(c.role === 'mav' || ((cT.mav || T.mav) && !cT.pctOfMav && c.role !== 'mavBackoff' && c.role !== 'rpe'));
-      const isRpe = c.role === 'rpe' || (!isMav && !!(cT.rpe || T.rpe) && mode === 'ramp' && c.role !== 'mavBackoff');
-      const isMavBo = c.role === 'mavBackoff' || c.pctOfMav != null || cT.pctOfMav != null;
-      const pctMav = c.pctOfMav != null ? c.pctOfMav : cT.pctOfMav;
-      // kg bloccato su % del MAV; MAV/RPE: kg libero; fixed main: tutto bloccato
-      const isLocked = isMavBo || (main && mode === 'fixed' && !isMav && !isRpe);
-      // MAV e RPE: rip sempre fisse se prescritte (es. 3x3 RPE 7 → 3 rip)
-      const repsEditable = (isMav || isMavBo || (isRpe && prescRep != null))
-        ? false
-        : (!main || mode === 'free' || (mode === 'ramp' && prescRep == null));
+    let prescRep = c.reps != null ? c.reps : null;
+    if (prescRep == null && (c.role === 'mav' || (c.T && c.T.mavReps != null && !c.T.pctOfMav))) {
+      prescRep = (c.T && c.T.mavReps != null) ? c.T.mavReps : (T.mavReps != null ? T.mavReps : null);
+    }
+    let prescKg = c.kg != null ? c.kg : null;
+    // 100% del MAV → kg dalla serie MAV
+    if ((c.role === 'mavBackoff' || c.pctOfMav != null || (c.T && c.T.pctOfMav != null)) && prescKg == null) {
+      const mavKg = getMavKgFromLog(log, complex.configs);
+      const pct = c.pctOfMav != null ? c.pctOfMav : (c.T && c.T.pctOfMav);
+      if (mavKg != null && pct != null) prescKg = Math.round(mavKg * pct / 100 / 2.5) * 2.5;
+    }
 
-      const roleLbl = (isMav ? ' · MAV' + (prescRep != null ? ' ' + prescRep : '') : '')
-        + (isRpe ? ' · ' + (cT.rpe ? cT.rpe.txt : 'RPE') + (prescRep != null ? ' · ' + prescRep + ' rip' : '') : '')
-        + (isMavBo ? ' · ' + (pctMav != null ? pctMav + '% del MAV' : 'del MAV') : '')
-        + (cInfo.roles && cInfo.roles[si] === 'top' ? ' · Top set' : cInfo.roles && cInfo.roles[si] === 'backoff' ? ' · Back-off' : '')
-        + (mode === 'ramp' && !cInfo.roles && !isMav && (c.bpos != null ? c.bpos : si) >= (cInfo.count || 1) ? ' · extra' : '')
-        + (mode === 'ramp' && cT.rpe && rpeOf(s) != null && rpeOf(s) >= cT.rpe.lo ? ' · target ✓' : '');
+    const isMav = !!(c.role === 'mav' || ((cT.mav || T.mav) && !cT.pctOfMav && c.role !== 'mavBackoff' && c.role !== 'rpe'));
+    const isRpe = c.role === 'rpe' || (!isMav && !!(cT.rpe || T.rpe) && mode === 'ramp' && c.role !== 'mavBackoff');
+    const isMavBo = c.role === 'mavBackoff' || c.pctOfMav != null || cT.pctOfMav != null;
+    const pctMav = c.pctOfMav != null ? c.pctOfMav : cT.pctOfMav;
+    // kg bloccato su % del MAV; MAV/RPE: kg libero; fixed main: tutto bloccato
+    const isLocked = isMavBo || (main && mode === 'fixed' && !isMav && !isRpe);
+    // MAV e RPE: rip sempre fisse se prescritte (es. 3x3 RPE 7 → 3 rip)
+    const repsEditable = (isMav || isMavBo || (isRpe && prescRep != null))
+      ? false
+      : (!main || mode === 'free' || (mode === 'ramp' && prescRep == null));
 
-      const isDone = !!s.done;
-      let inputs = '';
+    const roleLbl = (isMav ? ' · MAV' + (prescRep != null ? ' ' + prescRep : '') : '')
+      + (isRpe ? ' · ' + (cT.rpe ? cT.rpe.txt : 'RPE') + (prescRep != null ? ' · ' + prescRep + ' rip' : '') : '')
+      + (isMavBo ? ' · ' + (pctMav != null ? pctMav + '% del MAV' : 'del MAV') : '')
+      + (cInfo.roles && cInfo.roles[si] === 'top' ? ' · Top set' : cInfo.roles && cInfo.roles[si] === 'backoff' ? ' · Back-off' : '')
+      + (mode === 'ramp' && !cInfo.roles && !isMav && (c.bpos != null ? c.bpos : si) >= (cInfo.count || 1) ? ' · extra' : '')
+      + (mode === 'ramp' && cT.rpe && rpeOf(s) != null && rpeOf(s) >= cT.rpe.lo ? ' · target ✓' : '');
 
-      if (mono) {
-        // Logica monolaterale inalterata, usa prescRep
-        ensureMonoSides(s);
-        const setDoneBar = `<button type="button" class="mono-set-toggle ${isDone ? 'on' : ''}" data-mono-set-toggle="1">${isDone ? '✓ Serie ' + (si + 1) + ' completa' : 'Segna serie ' + (si + 1) + ' (Sx + Dx) · ' + fmtRest(restSec)}</button>`;
-        const sides = [{ key: 'L', label: 'Sinistro' }, { key: 'R', label: 'Destro' }];
-        const sidesHtml = sides.map(side => {
-          const sd = s[side.key];
-          const sideDone = !!sd.done;
-          const fromPrev = prevSetSideKg(log, si, side.key);
-          const kgV = sd.kg != null && sd.kg !== '' ? esc(String(sd.kg)) : '';
-          const repV = sd.reps != null && sd.reps !== '' ? esc(String(sd.reps)) : '';
-          const kgPh = fromPrev || 'kg';
-          
-          if (sideDone) return `<div class="mono-side mono-side-done" data-side="${side.key}"><div class="mono-side-label">✓ ${side.label}</div><div class="set-readonly set-done-ro"><span class="set-ro-kg">${kgV ? kgV + ' kg' : '— kg'}</span><span class="set-x">×</span><span class="set-ro-reps">${repV ? repV + ' rip' : '— rip'}</span></div><p class="set-lock-hint">Fatto · tocca per sbloccare</p></div>`;
-          return `<div class="mono-side" data-side="${side.key}"><div class="mono-side-label">${side.label} ·${fmtRest(restSec)}</div><div class="set-inputs"><input type="number" inputmode="decimal" step="0.5" placeholder="${esc(String(kgPh))}" value="${kgV}" oninput="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','kg',this.value)" onchange="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','kg',this.value);cascadeMonoKgFromSet(${wJs},${day},${exIndex},${si},'${side.key}')"><span class="set-x">×</span><input type="number" inputmode="numeric" step="1" placeholder="${prescRep != null ? prescRep : 'rip'}" value="${repV}" oninput="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','reps',this.value)" onchange="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','reps',this.value)"></div><p class="set-lock-hint">Tocca qui → fatto + recupero</p></div>`;
-        }).join('');
-        inputs = setDoneBar + `<div class="mono-sides">${sidesHtml}</div>`;
-      } else if (isDone) {
-        const kgShow = (s.kg !== '' && s.kg != null) ? String(s.kg).replace('.', ',') + ' kg' : (prescKg != null ? String(prescKg).replace('.', ',') + ' kg' : '— kg');
-        const repShow = (s.reps !== '' && s.reps != null) ? String(s.reps) + ' rip' : (prescRep != null ? String(prescRep) + ' rip' : '— rip');
-        inputs = `<div class="set-readonly set-done-ro"><span class="set-ro-kg">${esc(kgShow)}</span><span class="set-x">×</span><span class="set-ro-reps">${esc(repShow + (rpeOf(s) != null ? ' @' + String(rpeOf(s)).replace('.', ',') : ''))}</span></div><p class="set-lock-hint">Serie fatta · tocca la card per sbloccare</p>`;
-      } else if (isLocked) {
-        const kgLabel = prescKg != null ? String(prescKg).replace('.', ',') + ' kg'
-          : (isMavBo ? (pctMav != null ? pctMav + '% del MAV' : 'dopo MAV') : '— kg');
-        const repLabel = prescRep != null ? String(prescRep) + ' rip' : '— rip';
-        const hint = isMavBo
-          ? (prescKg != null ? 'Fisso: ' + (pctMav != null ? pctMav + '% del MAV' : 'del MAV') : 'Inserisci prima i kg del MAV')
-          : 'Fisso dalla scheda (fondamentale)';
-        inputs = `<div class="set-readonly"><span class="set-ro-kg">${esc(kgLabel)}</span><span class="set-x">×</span><span class="set-ro-reps">${esc(repLabel)}</span></div><p class="set-lock-hint">${esc(hint)}</p>`;
-      } else if (isMav) {
-        // MAV puro: kg sì · rip fisse = numero del MAV (mav5 → 5)
-        const kgVal = s.kg != null && s.kg !== '' ? esc(String(s.kg)) : '';
-        const fixedRep = prescRep != null ? String(prescRep) : '—';
-        // forza rip nel log
-        if (prescRep != null && (s.reps === '' || s.reps == null)) s.reps = String(prescRep);
-        inputs = `<div class="set-inputs set-rpe">
+    const isDone = !!s.done;
+    let inputs = '';
+
+    if (mono) {
+      // Logica monolaterale inalterata, usa prescRep
+      ensureMonoSides(s);
+      const setDoneBar = `<button type="button" class="mono-set-toggle ${isDone ? 'on' : ''}" data-mono-set-toggle="1">${isDone ? '✓ Serie ' + (si + 1) + ' completa' : 'Segna serie ' + (si + 1) + ' (Sx + Dx) · ' + fmtRest(restSec)}</button>`;
+      const sides = [{ key: 'L', label: 'Sinistro' }, { key: 'R', label: 'Destro' }];
+      const sidesHtml = sides.map(side => {
+        const sd = s[side.key];
+        const sideDone = !!sd.done;
+        const fromPrev = prevSetSideKg(log, si, side.key);
+        const kgV = sd.kg != null && sd.kg !== '' ? esc(String(sd.kg)) : '';
+        const repV = sd.reps != null && sd.reps !== '' ? esc(String(sd.reps)) : '';
+        const kgPh = fromPrev || 'kg';
+
+        if (sideDone) return `<div class="mono-side mono-side-done" data-side="${side.key}"><div class="mono-side-label">✓ ${side.label}</div><div class="set-readonly set-done-ro"><span class="set-ro-kg">${kgV ? kgV + ' kg' : '— kg'}</span><span class="set-x">×</span><span class="set-ro-reps">${repV ? repV + ' rip' : '— rip'}</span></div><p class="set-lock-hint">Fatto · tocca per sbloccare</p></div>`;
+        return `<div class="mono-side" data-side="${side.key}"><div class="mono-side-label">${side.label} ·${fmtRest(restSec)}</div><div class="set-inputs"><input type="number" inputmode="decimal" step="0.5" placeholder="${esc(String(kgPh))}" value="${kgV}" oninput="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','kg',this.value)" onchange="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','kg',this.value);cascadeMonoKgFromSet(${wJs},${day},${exIndex},${si},'${side.key}')"><span class="set-x">×</span><input type="number" inputmode="numeric" step="1" placeholder="${prescRep != null ? prescRep : 'rip'}" value="${repV}" oninput="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','reps',this.value)" onchange="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','reps',this.value)"></div><p class="set-lock-hint">Tocca qui → fatto + recupero</p></div>`;
+      }).join('');
+      inputs = setDoneBar + `<div class="mono-sides">${sidesHtml}</div>`;
+    } else if (isDone) {
+      const kgShow = (s.kg !== '' && s.kg != null) ? String(s.kg).replace('.', ',') + ' kg' : (prescKg != null ? String(prescKg).replace('.', ',') + ' kg' : '— kg');
+      const repShow = (s.reps !== '' && s.reps != null) ? String(s.reps) + ' rip' : (prescRep != null ? String(prescRep) + ' rip' : '— rip');
+      inputs = `<div class="set-readonly set-done-ro"><span class="set-ro-kg">${esc(kgShow)}</span><span class="set-x">×</span><span class="set-ro-reps">${esc(repShow + (rpeOf(s) != null ? ' @' + String(rpeOf(s)).replace('.', ',') : ''))}</span></div><p class="set-lock-hint">Serie fatta · tocca la card per sbloccare</p>`;
+    } else if (isLocked) {
+      const kgLabel = prescKg != null ? String(prescKg).replace('.', ',') + ' kg'
+        : (isMavBo ? (pctMav != null ? pctMav + '% del MAV' : 'dopo MAV') : '— kg');
+      const repLabel = prescRep != null ? String(prescRep) + ' rip' : '— rip';
+      const hint = isMavBo
+        ? (prescKg != null ? 'Fisso: ' + (pctMav != null ? pctMav + '% del MAV' : 'del MAV') : 'Inserisci prima i kg del MAV')
+        : 'Fisso dalla scheda (fondamentale)';
+      inputs = `<div class="set-readonly"><span class="set-ro-kg">${esc(kgLabel)}</span><span class="set-x">×</span><span class="set-ro-reps">${esc(repLabel)}</span></div><p class="set-lock-hint">${esc(hint)}</p>`;
+    } else if (isMav) {
+      // MAV puro: kg sì · rip fisse = numero del MAV (mav5 → 5)
+      const kgVal = s.kg != null && s.kg !== '' ? esc(String(s.kg)) : '';
+      const fixedRep = prescRep != null ? String(prescRep) : '—';
+      // forza rip nel log
+      if (prescRep != null && (s.reps === '' || s.reps == null)) s.reps = String(prescRep);
+      inputs = `<div class="set-inputs set-rpe">
              <input type="number" inputmode="decimal" step="0.5" placeholder="kg" value="${kgVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
              <span class="set-x">×</span>
              <span class="set-ro-reps set-ro-inline">${esc(fixedRep)} rip</span>
            </div>
            <p class="set-lock-hint">MAV ${prescRep != null ? prescRep : ''} · kg modificabili · ripetizioni fisse</p>`;
-      } else if (mode === 'ramp') {
-        const kgVal = s.kg != null && s.kg !== '' ? esc(String(s.kg)) : '';
-        const repVal = s.reps != null && s.reps !== '' ? esc(String(s.reps)) : (!repsEditable && prescRep != null ? String(prescRep) : '');
-        const rpeVal = s.rpe != null && s.rpe !== '' ? esc(String(s.rpe)) : '';
-        const bStart = si - (c.bpos || 0);
-        const bLog = { sets: log.sets.slice(bStart, bStart + (c.bsize || log.sets.length)) };
-        const bEst = multiBlock ? (prescKg != null ? prescKg : rpeTargetKg(cT, prescRep, lift)) : (prescKg != null ? prescKg : est);
-        const ph = rampPlaceholder(cT, cInfo, bLog, c.bpos || 0, bEst);
-        const roRepAttr = !repsEditable ? 'readonly class="ro-input" tabindex="-1"' : '';
-        
-        inputs = `<div class="set-inputs set-ramp">
+    } else if (mode === 'ramp') {
+      const kgVal = s.kg != null && s.kg !== '' ? esc(String(s.kg)) : '';
+      const repVal = s.reps != null && s.reps !== '' ? esc(String(s.reps)) : (!repsEditable && prescRep != null ? String(prescRep) : '');
+      const rpeVal = s.rpe != null && s.rpe !== '' ? esc(String(s.rpe)) : '';
+      const bStart = si - (c.bpos || 0);
+      const bLog = { sets: log.sets.slice(bStart, bStart + (c.bsize || log.sets.length)) };
+      const bEst = multiBlock ? (prescKg != null ? prescKg : rpeTargetKg(cT, prescRep, lift)) : (prescKg != null ? prescKg : est);
+      const ph = rampPlaceholder(cT, cInfo, bLog, c.bpos || 0, bEst);
+      const roRepAttr = !repsEditable ? 'readonly class="ro-input" tabindex="-1"' : '';
+
+      inputs = `<div class="set-inputs set-ramp">
              <input type="number" inputmode="decimal" step="0.5" placeholder="${esc(ph)}" value="${kgVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
              <span class="set-x">×</span>
              <input type="number" inputmode="numeric" step="1" placeholder="${prescRep != null ? prescRep : 'rip'}" value="${repVal}" ${roRepAttr} oninput="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)">
@@ -2106,61 +2106,61 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
              <input type="number" inputmode="decimal" step="0.5" min="1" max="10" placeholder="${cT.rpe ? esc(String(cT.rpe.hi)) : 'RPE'}" value="${rpeVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'rpe',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'rpe',this.value)">
            </div>
            <p class="set-lock-hint">kg × rip @ RPE sentito · tocca la card quando hai finito</p>`;
-      } else {
-        const pSet = prevInfo && prevInfo.sets ? (prevInfo.sets[si] || prevInfo.sets[prevInfo.sets.length - 1]) : null;
-        const prevHint = pSet && ((pSet.kg !== '' && pSet.kg != null) || (pSet.reps !== '' && pSet.reps != null)) ? `<p class="set-prev-hint">Scorsa (${esc(String(prevInfo.week))}): <b>${pSet.kg !== '' && pSet.kg != null ? esc(String(pSet.kg)) + ' kg' : '—'} × ${pSet.reps !== '' && pSet.reps != null ? esc(String(pSet.reps)) + ' rip' : '—'}</b> · cerca di migliorare</p>` : '';
-        const fromPrev = prevSetKg(log, si);
-        const kgVal = s.kg != null && s.kg !== '' ? esc(String(s.kg)) : '';
-        const repVal = s.reps != null && s.reps !== '' ? esc(String(s.reps)) : (!repsEditable && prescRep != null ? String(prescRep) : '');
-        const kgPh = fromPrev ? String(fromPrev) : 'kg';
-        const suggestNote = fromPrev && (s.kg === '' || s.kg == null) ? `<p class="set-prev-hint">Suggerito serie prec.: <b>${esc(String(fromPrev))} kg</b> (placeholder)</p>` : '';
-        const roRepAttr = !repsEditable ? 'readonly class="ro-input" tabindex="-1"' : '';
+    } else {
+      const pSet = prevInfo && prevInfo.sets ? (prevInfo.sets[si] || prevInfo.sets[prevInfo.sets.length - 1]) : null;
+      const prevHint = pSet && ((pSet.kg !== '' && pSet.kg != null) || (pSet.reps !== '' && pSet.reps != null)) ? `<p class="set-prev-hint">Scorsa (${esc(String(prevInfo.week))}): <b>${pSet.kg !== '' && pSet.kg != null ? esc(String(pSet.kg)) + ' kg' : '—'} × ${pSet.reps !== '' && pSet.reps != null ? esc(String(pSet.reps)) + ' rip' : '—'}</b> · cerca di migliorare</p>` : '';
+      const fromPrev = prevSetKg(log, si);
+      const kgVal = s.kg != null && s.kg !== '' ? esc(String(s.kg)) : '';
+      const repVal = s.reps != null && s.reps !== '' ? esc(String(s.reps)) : (!repsEditable && prescRep != null ? String(prescRep) : '');
+      const kgPh = fromPrev ? String(fromPrev) : 'kg';
+      const suggestNote = fromPrev && (s.kg === '' || s.kg == null) ? `<p class="set-prev-hint">Suggerito serie prec.: <b>${esc(String(fromPrev))} kg</b> (placeholder)</p>` : '';
+      const roRepAttr = !repsEditable ? 'readonly class="ro-input" tabindex="-1"' : '';
 
-        inputs = `<div class="set-inputs">
+      inputs = `<div class="set-inputs">
              <input type="number" inputmode="decimal" step="0.5" placeholder="${esc(kgPh)}" value="${kgVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
              <span class="set-x">×</span>
              <input type="number" inputmode="numeric" step="1" placeholder="${prescRep != null ? prescRep : 'rip'}" value="${repVal}" ${roRepAttr} oninput="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)">
            </div>${suggestNote}${prevHint}`;
-      }
+    }
 
-      return `<div class="set-card ${isDone ? 'set-done' : ''} ${isLocked ? 'set-locked' : ''}" data-ex="${esc(exercise.name)}" data-week="${esc(weekLabel)}" data-day="${day}" data-exi="${exIndex}" data-set="${si}" role="button" title="${isDone ? 'Serie fatta · tocca per annullare' : 'Tocca: segna fatta + recupero ' + fmtRest(restSec)}">
+    return `<div class="set-card ${isDone ? 'set-done' : ''} ${isLocked ? 'set-locked' : ''}" data-ex="${esc(exercise.name)}" data-week="${esc(weekLabel)}" data-day="${day}" data-exi="${exIndex}" data-set="${si}" role="button" title="${isDone ? 'Serie fatta · tocca per annullare' : 'Tocca: segna fatta + recupero ' + fmtRest(restSec)}">
         <div class="set-label">
           <span class="set-title">${isDone ? '✓ ' : ''}Serie ${(multiBlock && c.bpos != null ? c.bpos : si) + (multiBlock && c.bpos != null ? 1 : 1)}${roleLbl}${c.role === 'inst' ? ' · libera' : ''}${multiBlock && c.blockKind === 'pct' && c.T && /%/.test(c.partText || '') ? ' · ' + (String(c.partText).match(/(\d+(?:[.,]\d+)?)\s*%/) || [])[1] + '%' : ''}${prescRep != null && repsEditable ? ' · obiettivo ' + prescRep + ' rip' : ''}</span>
           <span class="set-rest-hint">${isDone ? 'fatta' : fmtRest(restSec)}</span>
         </div>
         ${inputs}
       </div>`;
-    }).reduce((acc, html, si) => {
-      const cfg = effConfigs[si];
-      const prev = effConfigs[si - 1];
-      const next = effConfigs[si + 1];
-      // intestazione del blocco (solo prescrizioni con più blocchi)
-      if (multiBlock && cfg && (!prev || prev.blockIdx !== cfg.blockIdx)) {
-        const bn = blocksList.findIndex(b => b.idx === cfg.blockIdx) + 1;
-        const bsz = cfg.bsize != null ? cfg.bsize : 1;
-        const bStart = si;
-        const bLog = { sets: log.sets.slice(bStart, bStart + bsz) };
-        const cT0 = cfg.T || T;
-        const estB = cfg.kg != null ? cfg.kg : rpeTargetKg(cT0, cfg.reps, lift);
-        const extraHdr = cfg.blockKind === 'rpe' || cfg.blockKind === 'ramp' ? rampHeaderHtml(cT0, cfg.info || info, bLog, estB, lift) : '';
-        const fixedHint = cfg.blockKind === 'pct' ? '<p class="ramp-info">Serie, rip e kg fissi dalla scheda</p>' : (cfg.blockKind === 'inst' ? '<p class="ramp-info">Istintivo: kg e rip liberi, scegli a sensazione</p>' : '');
-        acc.push(`<div class="block-head block-${cfg.blockKind}"><span class="block-n">Blocco ${bn} — ${esc(BLOCK_LABEL[cfg.blockKind] || '')}</span><span class="block-txt">${esc(cfg.partText || '')}</span></div>${extraHdr}${fixedHint}`);
-      }
-      acc.push(html);
-      // bottoni +/− sotto l'ultima serie di ogni blocco espandibile
-      if (cfg && (!next || next.blockIdx !== cfg.blockIdx) && !mono) {
-        const blk = blocksList.find(b => b.idx === cfg.blockIdx);
-        if (blk && blk.expandable) {
-          const lbl = { mav: 'MAV', rpe: 'RPE', inst: 'istintiva', ramp: '', pct: '', fixed: '' }[blk.kind] || '';
-          const cls = blk.kind === 'mav' ? 'mav-actions' : (blk.kind === 'rpe' ? 'rpe-actions' : '');
-          acc.push(`<div class="ramp-actions ${cls}">
+  }).reduce((acc, html, si) => {
+    const cfg = effConfigs[si];
+    const prev = effConfigs[si - 1];
+    const next = effConfigs[si + 1];
+    // intestazione del blocco (solo prescrizioni con più blocchi)
+    if (multiBlock && cfg && (!prev || prev.blockIdx !== cfg.blockIdx)) {
+      const bn = blocksList.findIndex(b => b.idx === cfg.blockIdx) + 1;
+      const bsz = cfg.bsize != null ? cfg.bsize : 1;
+      const bStart = si;
+      const bLog = { sets: log.sets.slice(bStart, bStart + bsz) };
+      const cT0 = cfg.T || T;
+      const estB = cfg.kg != null ? cfg.kg : rpeTargetKg(cT0, cfg.reps, lift);
+      const extraHdr = cfg.blockKind === 'rpe' || cfg.blockKind === 'ramp' ? rampHeaderHtml(cT0, cfg.info || info, bLog, estB, lift) : '';
+      const fixedHint = cfg.blockKind === 'pct' ? '<p class="ramp-info">Serie, rip e kg fissi dalla scheda</p>' : (cfg.blockKind === 'inst' ? '<p class="ramp-info">Istintivo: kg e rip liberi, scegli a sensazione</p>' : '');
+      acc.push(`<div class="block-head block-${cfg.blockKind}"><span class="block-n">Blocco ${bn} — ${esc(BLOCK_LABEL[cfg.blockKind] || '')}</span><span class="block-txt">${esc(cfg.partText || '')}</span></div>${extraHdr}${fixedHint}`);
+    }
+    acc.push(html);
+    // bottoni +/− sotto l'ultima serie di ogni blocco espandibile
+    if (cfg && (!next || next.blockIdx !== cfg.blockIdx) && !mono) {
+      const blk = blocksList.find(b => b.idx === cfg.blockIdx);
+      if (blk && blk.expandable) {
+        const lbl = { mav: 'MAV', rpe: 'RPE', inst: 'istintiva', ramp: '', pct: '', fixed: '' }[blk.kind] || '';
+        const cls = blk.kind === 'mav' ? 'mav-actions' : (blk.kind === 'rpe' ? 'rpe-actions' : '');
+        acc.push(`<div class="ramp-actions ${cls}">
           <button type="button" onclick='addBlockSet(${wJs},${day},${exIndex},${blk.idx})'>＋ Aggiungi serie${lbl ? ' ' + lbl : ''}</button>
           ${cfg.bsize > 1 ? `<button type="button" onclick='removeBlockSet(${wJs},${day},${exIndex},${blk.idx})'>− Togli ultima${lbl ? ' ' + lbl : ''}</button>` : ''}
         </div>`);
-        }
       }
-      return acc;
-    }, []).join('')}
+    }
+    return acc;
+  }, []).join('')}
   </div>`;
 }
 /** secondi → "HH:MM:SS" per input type=time */
@@ -2265,14 +2265,14 @@ function playRestBeep() {
       o.start(now + off);
       o.stop(now + off + 0.2);
     });
-    setTimeout(() => { try { ctx.close(); } catch (e) {} }, 1200);
-  } catch (e) {}
+    setTimeout(() => { try { ctx.close(); } catch (e) { } }, 1200);
+  } catch (e) { }
 }
 async function notifyRestDone(name) {
   try {
     if (!('Notification' in window)) return;
     if (Notification.permission === 'default') {
-      try { await Notification.requestPermission(); } catch (e) {}
+      try { await Notification.requestPermission(); } catch (e) { }
     }
     if (Notification.permission === 'granted') {
       const opts = {
@@ -2287,10 +2287,10 @@ async function notifyRestDone(name) {
         if (reg && reg.showNotification) reg.showNotification('Recupero finito', opts);
         else new Notification('Recupero finito', opts);
       } catch (e) {
-        try { new Notification('Recupero finito', opts); } catch (e2) {}
+        try { new Notification('Recupero finito', opts); } catch (e2) { }
       }
     }
-  } catch (e) {}
+  } catch (e) { }
 }
 function isIosDevice() {
   try {
@@ -2300,7 +2300,7 @@ function isIosDevice() {
 }
 /** Apre Comandi Rapidi "Recupero PL": secondi = avvia timer; "stop" = ferma timer sistema */
 function openSystemRestTimer(secOrStop, ev) {
-  if (ev) { try { ev.stopPropagation(); ev.preventDefault(); } catch (e) {} }
+  if (ev) { try { ev.stopPropagation(); ev.preventDefault(); } catch (e) { } }
   const name = encodeURIComponent('Recupero PL');
   let text;
   // stringa vuota = ferma timer (Se input non contiene nessun valore → Annulla)
@@ -2309,7 +2309,7 @@ function openSystemRestTimer(secOrStop, ev) {
   } else {
     const sec = Math.max(15, Math.min(600, parseInt(secOrStop, 10) || 120));
     text = encodeURIComponent(String(sec));
-    try { localStorage.setItem('powerapp_rest_ends', String(Date.now() + sec * 1000)); } catch (e) {}
+    try { localStorage.setItem('powerapp_rest_ends', String(Date.now() + sec * 1000)); } catch (e) { }
   }
   const url = 'shortcuts://run-shortcut?name=' + name + '&input=text&text=' + text;
   try {
@@ -2318,7 +2318,7 @@ function openSystemRestTimer(secOrStop, ev) {
     iframe.style.display = 'none';
     iframe.src = url;
     document.body.appendChild(iframe);
-    setTimeout(() => { try { document.body.removeChild(iframe); } catch (e) {} }, 1500);
+    setTimeout(() => { try { document.body.removeChild(iframe); } catch (e) { } }, 1500);
     // fallback se iframe non basta
     setTimeout(() => {
       try {
@@ -2327,11 +2327,11 @@ function openSystemRestTimer(secOrStop, ev) {
         a.style.display = 'none';
         document.body.appendChild(a);
         a.click();
-        setTimeout(() => { try { document.body.removeChild(a); } catch (e) {} }, 500);
-      } catch (e) {}
+        setTimeout(() => { try { document.body.removeChild(a); } catch (e) { } }, 500);
+      } catch (e) { }
     }, 50);
   } catch (e) {
-    try { window.location.href = url; } catch (e2) {}
+    try { window.location.href = url; } catch (e2) { }
   }
 }
 function onRestFinished() {
@@ -2341,15 +2341,26 @@ function onRestFinished() {
     clearInterval(_restTimer._iv);
     _restTimer._iv = null;
   }
-  try { localStorage.removeItem('powerapp_rest_ends'); } catch (e) {}
+  try { localStorage.removeItem('powerapp_rest_ends'); } catch (e) { }
   playRestBeep();
-  try { if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 400]); } catch (e) {}
+  try { if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 400]); } catch (e) { }
   notifyRestDone(_restTimer && _restTimer.name);
-  _restTimer = null;
-  try { localStorage.removeItem('powerapp_rest_name'); } catch (e) {}
+  const el = document.getElementById('rest-timer-display');
+  if (el) { el.textContent = 'Fine!'; el.classList.add('done'); }
+  const bar = document.querySelector('.rest-bar');
+  if (bar) bar.classList.add('done');
+  setTimeout(() => {
+    if (_restTimer && _restTimer.left <= 0) {
+      _restTimer = null;
+      try { localStorage.removeItem('powerapp_rest_ends'); localStorage.removeItem('powerapp_rest_name'); } catch (e) { }
+      render();
+    }
+  }, 2500);
+  // se la barra non c'è (pagina non renderizzata), forza un render
+  if (!el) { try { render(); } catch (e) { } }
 }
 function startRest(name, ev) {
-  if (ev) { try { ev.stopPropagation(); ev.preventDefault(); } catch (e) {} }
+  if (ev) { try { ev.stopPropagation(); ev.preventDefault(); } catch (e) { } }
   const sec = getRestSec(name) || 120;
   if (_restTimer && _restTimer._iv) {
     clearInterval(_restTimer._iv);
@@ -2357,29 +2368,27 @@ function startRest(name, ev) {
   }
   const endsAt = Date.now() + sec * 1000;
   _restTimer = { endsAt: endsAt, name: String(name || ''), left: sec, _done: false };
-  try { localStorage.setItem('powerapp_rest_ends', String(endsAt)); localStorage.setItem('powerapp_rest_name', String(name || '')); } catch (e) {}
-
-  // Feedback visivo sul pulsante premuto
-  if (ev && ev.currentTarget) {
-    const btn = ev.currentTarget;
-    const oldText = btn.textContent;
-    btn.textContent = 'Avviato ✓';
-    btn.classList.add('started');
-    setTimeout(() => {
-      btn.textContent = oldText;
-      btn.classList.remove('started');
-    }, 1500);
-  }
+  try { localStorage.setItem('powerapp_rest_ends', String(endsAt)); localStorage.setItem('powerapp_rest_name', String(name || '')); } catch (e) { }
 
   const tick = () => {
     if (!_restTimer || _restTimer._done) return;
     _restTimer.left = Math.max(0, Math.ceil((_restTimer.endsAt - Date.now()) / 1000));
+    const el = document.getElementById('rest-timer-display');
+    if (el) {
+      if (_restTimer.left > 0) {
+        const m = Math.floor(_restTimer.left / 60);
+        const s = _restTimer.left % 60;
+        el.textContent = m + ':' + String(s).padStart(2, '0');
+        el.classList.remove('done');
+      }
+    }
     if (_restTimer.left <= 0) {
       if (_restTimer._iv) { clearInterval(_restTimer._iv); _restTimer._iv = null; }
       onRestFinished();
     }
   };
   _restTimer._iv = setInterval(tick, 200);
+  render();
   tick();
 
   // iPhone: avvia subito il Timer di sistema (Comandi "Recupero PL")
@@ -2395,26 +2404,45 @@ function resumeRestTimerIfNeeded() {
     const left = Math.ceil((ends - Date.now()) / 1000);
     const name = localStorage.getItem('powerapp_rest_name') || '';
     if (left <= 0) {
+      if (!_restTimer) _restTimer = { endsAt: ends, name: name, left: 0, _done: false };
+      else { _restTimer.endsAt = ends; _restTimer.left = 0; }
       onRestFinished();
       return;
     }
+    // riprendi conteggio se perso (JS sospeso)
     if (!_restTimer || !_restTimer._iv) {
       _restTimer = { endsAt: ends, name: name, left: left, _done: false };
       const tick = () => {
         if (!_restTimer || _restTimer._done) return;
         _restTimer.left = Math.max(0, Math.ceil((_restTimer.endsAt - Date.now()) / 1000));
+        const el = document.getElementById('rest-timer-display');
+        if (el && _restTimer.left > 0) {
+          const m = Math.floor(_restTimer.left / 60), s = _restTimer.left % 60;
+          el.textContent = m + ':' + String(s).padStart(2, '0');
+        }
         if (_restTimer.left <= 0) {
           if (_restTimer._iv) { clearInterval(_restTimer._iv); _restTimer._iv = null; }
           onRestFinished();
         }
       };
       _restTimer._iv = setInterval(tick, 200);
+      render();
       tick();
     }
-  } catch (e) {}
+  } catch (e) { }
 }
 function restBarHtml() {
-  return '';
+  if (!_restTimer) return '';
+  const left = Math.max(0, _restTimer.left | 0);
+  const m = Math.floor(left / 60);
+  const s = left % 60;
+  const done = left <= 0;
+  return `<div class="rest-bar ${done ? 'done' : ''}" id="rest-bar">
+    <div class="rest-bar-inner">
+      <span class="rest-label">Recupero · ${esc(_restTimer.name)}</span>
+      <span id="rest-timer-display" class="rest-time ${done ? 'done' : ''}">${done ? 'Fine!' : (m + ':' + String(s).padStart(2, '0'))}</span>
+    </div>
+  </div>`;
 }
 function fmtRest(sec) {
   sec = Math.max(0, parseInt(sec, 10) || 0);
@@ -2467,8 +2495,8 @@ function dayModalHtml() {
   let body = '';
   if (S.dayModal.step === 'pick') {
     const allD = days(w);
-      const doneArr = (S.done[w.label] || []).map(Number);
-      body = `<p class="big">Quale allenamento?</p>
+    const doneArr = (S.done[w.label] || []).map(Number);
+    body = `<p class="big">Quale allenamento?</p>
       <p class="mut">${esc(w.label)} · tocca un giorno</p>
       ${allD.map(d => `<button type="button" style="border-left:8px solid ${AC[(d - 1) % 4]}" onclick="modalTrain(${d})">Giorno ${d} — ${focus(w, d)}${doneArr.includes(Number(d)) ? ' ✓' : ''}</button>`).join('') || '<p class="mut">Nessun giorno</p>'}
       <button type="button" style="border-left:8px solid #30a46c" onclick="modalTrain('comp')">Complementari</button>
@@ -2682,7 +2710,7 @@ function markAllSetsDone(week, day, i, done) {
   });
 }
 function tg(i) {
-  try { flushSetInputsFromDOM(); } catch (e) {}
+  try { flushSetInputsFromDOM(); } catch (e) { }
   const w = W();
   if (!w || !S.today || S.today.day == null) return;
   const d = S.today.day;
@@ -2726,7 +2754,7 @@ function logFinishedWorkout(weekLabel, day, weekdayOverride) {
   removeWorkoutLogByWeekDay(weekLabel, day, S.prog && S.prog.id);
   removeStoricoByWeekWeekday(weekLabel, wd, S.prog && S.prog.id);
   if (_keepAcc) { S.accLog = S.accLog || {}; S.accLog[k] = _keepAcc; }
-  
+
   const entry = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
     type: 'train',
@@ -2812,7 +2840,7 @@ function logFinishedWorkout(weekLabel, day, weekdayOverride) {
       };
     }),
   };
-  
+
   S.workoutLog = S.workoutLog || [];
   S.workoutLog.unshift(entry);
   if (S.workoutLog.length > 100) S.workoutLog.length = 100;
@@ -2832,7 +2860,7 @@ function deleteWorkoutLog(id) {
   render();
 }
 function finish() {
-  try { flushSetInputsFromDOM(); } catch (e) {}
+  try { flushSetInputsFromDOM(); } catch (e) { }
   const w = W();
   if (!w || !S.today) return;
   const d = Number(S.today.day);
@@ -3017,7 +3045,8 @@ function renderTrainSession(week, day) {
     </div>`;
   }).join('');
 
-  return `<div class="train-wrap" style="--ac:${ac}">
+  return `${restBarHtml()}
+  <div class="train-wrap" style="--ac:${ac}">
     <div class="hero">
       <div class="mut">${esc(week.label)} · GIORNO ${d}</div>
       <p class="big">${focus(week, d)}</p>
@@ -3089,7 +3118,7 @@ function exportWorkoutCsv() {
     alert('Nessun allenamento nello storico da esportare.');
     return;
   }
-  const headers = ['workout_id','date','at','prog_id','prog_name','week','day','title','exercise','warm','main','exercise_done','set_n','kg','reps','set_done'];
+  const headers = ['workout_id', 'date', 'at', 'prog_id', 'prog_name', 'week', 'day', 'title', 'exercise', 'warm', 'main', 'exercise_done', 'set_n', 'kg', 'reps', 'set_done'];
   const lines = [headers.join(',')];
   list.forEach(w => {
     const exs = w.exercises && w.exercises.length ? w.exercises : [{ name: '', warm: 0, main: 0, done: 0, sets: [] }];
@@ -3709,7 +3738,7 @@ function render() {
       openDayModal(true);
       return;
     }
-  } catch (e) {}
+  } catch (e) { }
   // delay leggero così il DOM è pronto
   setTimeout(() => openDayModal(false), 120);
 })();
