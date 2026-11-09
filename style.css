@@ -1970,3 +1970,20 @@ input.kg-suggested {
 .comp-apply-btn:hover {
   background: rgba(48, 164, 108, .28);
 }
+
+/* Log per esercizio: "Volta scorsa" */
+.hist-last {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--tx);
+  background: var(--pill);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.hist-last i {
+  color: var(--mut);
+  font-style: normal;
+  margin: 0 2px;
+}

@@ -4,7 +4,8 @@ try { S = JSON.parse(localStorage.getItem(KEY)) || {} } catch (e) { }
 S.max = S.max || { s: 210, b: 110, d: 265 }; S.done = S.done || {}; S.chk = S.chk || {}; S.wi = S.wi || 0; S.view = S.view || 'oggi'; S.time = S.time || '17:00'; S.pushOn = S.pushOn || false; S.weekLog = S.weekLog || {}; S.promptedDate = S.promptedDate || null; S.dayModal = S.dayModal || null; S.accLog = S.accLog || {}; S.liftHistory = S.liftHistory || {}; S.restByEx = S.restByEx || {}; S.restDefault = S.restDefault || 120; S.restPicker = S.restPicker || null; S.workoutLog = S.workoutLog || []; S.progCatalog = S.progCatalog || []; S.pianoSession = S.pianoSession || null;
 S.compModal = S.compModal || null; S.restSystemTimer = S.restSystemTimer !== false;
 S.exNotes = S.exNotes || {}; S.nextLoad = S.nextLoad || {};
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)) } catch (e) { } };
+let _saveWarned = false;
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)) } catch (e) { if (!_saveWarned) { _saveWarned = true; try { alert('Attenzione: impossibile salvare i dati (memoria del browser piena?). Scarica subito un backup dalla scheda Piano.'); } catch (e2) { } } } };
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const pad = n => String(n).padStart(2, '0');
@@ -27,6 +28,8 @@ function ensureProgMeta(prog, fileName) {
   if (!prog.fileName) {
     prog.fileName = /\.docx$/i.test(prog.name) ? prog.name : (prog.name + '.docx');
   }
+  // L'identità (id) viene decisa all'import da matchKnownProg(); qui si ri-aggancia solo se manca
+  if (prog.id) return prog;
   // Riusa l'id se questa scheda (stesso file .docx) era già in catalogo/storico
   const fnKey = String(prog.fileName).toLowerCase();
   const nameKey = String(prog.name).toLowerCase();
@@ -171,7 +174,7 @@ function removeWorkoutLogByWeekDay(weekLabel, day, progId) {
     });
     const k = weekLabel + '|' + day;
     if (S.chk) delete S.chk[k];
-    if (S.accLog) delete S.accLog[k];
+    if (S.accLog) delete S.accLog[accKeyFor(progId || exCurProgId(), weekLabel, day)];
   }
 }
 /** Rimuove dallo storico per settimana + weekday calendario (Lun–Dom) */
@@ -438,7 +441,7 @@ function pianoSessionHtml() {
   const ac = AC[(Number(d) - 1) % 4];
   const list = ex.map((e, i) => {
     const acc = isAccessory(e);
-    const hist = !e.warm ? historyHtml(e.name) : '';
+    const hist = !e.warm ? historyHtml(e.name, week.label, d) : '';
     const noteBlock = exNoteAndNextLoadHtml(week.label, d, i, e);
     const setsBlock = !e.warm ? (setsLogHtml(week.label, d, i, e) + hist + noteBlock) : '';
     return `<div class="ex ${e.warm ? 'w' : ''} ${e.lift ? 'main' : ''} ${acc ? 'acc' : ''} ${ck.includes(i) ? 'ok' : ''}">
@@ -500,7 +503,7 @@ function compOnNameChange(i, name) {
   if (!S.compModal || !S.compModal.rows[i]) return;
   const r = S.compModal.rows[i];
   r.name = name;
-  const planned = name ? getPlannedLoad(name, S.compModal.week, S.compModal.wd) : null;
+  const planned = name ? getPlannedLoad(name, S.compModal.week, 'comp') : null;
   if (planned && planned.kg != null && (r.kg === '' || r.kg == null)) {
     r.kg = String(planned.kg);
   }
@@ -578,9 +581,6 @@ function saveCompModal(empty) {
   entry.exercises = exs;
   entry.fromPiano = !exs.length;
   exs.forEach(e => {
-    if (e.nextKg != null) {
-      setNextLoadPlan(e.name, true, e.nextKg, e.nextNote);
-    }
     pushLiftHistory(e.name, e.sets, week, 'comp', e.nextKg, e.nextNote, e.note);
   });
   rebuildPianoFromStorico();
@@ -664,7 +664,7 @@ function compModalHtml() {
   if (!m) return '';
   const names = [...new Set(((S.prog && S.prog.weeks) || []).flatMap(w => Object.values(w.days || {}).flat()).filter(isAccessory).map(e => e.name))];
   const rows = m.rows.map((r, i) => {
-    const planned = r.name ? getPlannedLoad(r.name, m.week, m.wd) : null;
+    const planned = r.name ? getPlannedLoad(r.name, m.week, 'comp') : null;
     let plannedHint = '';
     if (planned && planned.kg != null) {
       plannedHint = `<div class="comp-planned-hint">📌 Programmato: <b>${esc(String(planned.kg))} kg</b>${planned.note ? ' — ' + esc(planned.note) : ''} <button type="button" class="comp-apply-btn" onclick="compApplyPlannedKg(${i}, ${planned.kg})">Usa</button></div>`;
@@ -729,6 +729,463 @@ function cancelDayEdit() { S.dayEdit = null; save(); render(); }
 function liftKey(name) {
   return String(name || '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
+/* =====================================================================
+ * REGISTRO ESERCIZI (v2)
+ * - exId: identità stabile di un esercizio, indipendente dal nome esatto
+ * - S.exLog[exId]: log per esercizio, indipendente dalla scheda caricata
+ * - chiavi di sessione (accLog / exNotes / nextLoad) legate a progId + exId
+ * - riconoscimento scheda (nome file + esercizi in comune)
+ * ===================================================================== */
+S.exLog = S.exLog || {};     // exId -> { name, mono, aliases:[], entries:[...] }
+S.exAlias = S.exAlias || {}; // chiave normalizzata -> exId
+S.exReg = S.exReg || {};     // exId -> { name, tokens:[], pending? }
+
+const EX_STOP = new Set(['con', 'di', 'del', 'della', 'dei', 'delle', 'il', 'la', 'lo', 'le', 'i', 'gli', 'un', 'una', 'a', 'al', 'alla', 'in', 'da', 'per', 'e', 'ed', 'su', 'the', 'of', 'and', 'x']);
+const EX_SYN = {
+  db: 'manubri', dumbbell: 'manubri', dumbbells: 'manubri', manubrio: 'manubri', manubri: 'manubri',
+  bb: 'bilanciere', barbell: 'bilanciere',
+  cable: 'cavi', cables: 'cavi', cavo: 'cavi',
+  machine: 'macchina', kb: 'kettlebell',
+  bench: 'panca', deadlift: 'stacco',
+  incline: 'inclinata', inclined: 'inclinata', inclinato: 'inclinata', decline: 'declinata', declinato: 'declinata',
+  pause: 'pausa', paused: 'pausa', pauses: 'pausa', pausato: 'pausa', pausata: 'pausa',
+  close: 'stretta', stretto: 'stretta', wide: 'larga', largo: 'larga',
+  seated: 'seduto', standing: 'piedi', lateral: 'laterale', laterals: 'laterale', rear: 'posteriore'
+};
+function exStem(t) {
+  if (/\d/.test(t) || t.length < 5) return t;
+  t = t.replace(/[aeio]$/, '');
+  t = t.replace(/(ch|gh)$/, m => m[0]);
+  return t;
+}
+// attrezzo: se due nomi hanno attrezzi diversi sono esercizi diversi (carichi non confrontabili)
+const EX_EQUIP = new Set(['manubri', 'bilanciere', 'cavi', 'macchina', 'kettlebell', 'elastico', 'smith', 'multipower', 'trap'].map(exStem));
+// modificatori che cambiano davvero l'esercizio
+const EX_MODS = new Set(['presa', 'stretta', 'larga', 'inclinata', 'declinata', 'pausa', 'fermi', 'fermo', 'front', 'sumo', 'box', 'deficit', 'rialzo', 'rialzi',
+  'tecnica', 'hammer', 'neutra', 'supina', 'prona', 'rovescia', 'rumeno', 'rdl', 'bulgara', 'bulgaro', 'hack', 'goblet', 'zercher', 'laterale', 'frontale', 'posteriore', 'alta', 'bassa', 'alto', 'basso', 'militare', 'push', 'jerk', 'spinta', 'tirata'].map(exStem));
+const _exNormCache = new Map();
+function exNorm(name) {
+  const raw = String(name || '');
+  if (_exNormCache.has(raw)) return _exNormCache.get(raw);
+  let s = raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  s = s.replace(/\([^)]*\)/g, ' ');                       // note tra parentesi
+  const mono = /mono\s*-?\s*laterali?|unilaterali?|unilateral|\bmono\b|\bsx\b|\bdx\b|\bsingolo\b/.test(s);
+  s = s.replace(/mono\s*-?\s*laterali?|unilaterali?|unilateral|\bmono\b|\bsx\b|\bdx\b|\bsingolo\b/g, ' ');
+  const toks = s.replace(/[^a-z0-9]+/g, ' ').split(' ').filter(Boolean)
+    .filter(t => !EX_STOP.has(t)).map(t => EX_SYN[t] || t).map(exStem);
+  const uniq = [...new Set(toks)].sort();
+  const out = { tokens: uniq, key: uniq.join('-'), mono };
+  _exNormCache.set(raw, out);
+  return out;
+}
+/** Somiglianza 0..1 tra due insiemi di token (Jaccard + contenimento, con vincoli su attrezzo e modificatori) */
+function exSim(a, b) {
+  if (!a.length || !b.length) return 0;
+  const A = new Set(a), B = new Set(b);
+  let inter = 0; A.forEach(t => { if (B.has(t)) inter++; });
+  let score = inter / (A.size + B.size - inter);
+  const diff = [...A].filter(t => !B.has(t)).concat([...B].filter(t => !A.has(t)));
+  if (diff.some(t => EX_MODS.has(t))) return Math.min(score, 0.4);
+  const ea = [...A].filter(t => EX_EQUIP.has(t)), eb = [...B].filter(t => EX_EQUIP.has(t));
+  if (ea.length && eb.length && ea.some(t => !B.has(t)) && eb.some(t => !A.has(t))) return Math.min(score, 0.4);
+  const equipDiff = diff.some(t => EX_EQUIP.has(t));
+  const small = A.size <= B.size ? A : B, big = A.size <= B.size ? B : A;
+  if (!equipDiff && small.size >= 2 && [...small].every(t => big.has(t))) score = Math.max(score, 0.85);
+  return score;
+}
+function exBestMatch(tokens, skipId) {
+  let best = null, bestScore = 0;
+  Object.keys(S.exReg).forEach(rid => {
+    if (rid === skipId) return;
+    const sc = exSim(tokens, S.exReg[rid].tokens || []);
+    if (sc > bestScore) { bestScore = sc; best = rid; }
+  });
+  return { id: best, score: bestScore };
+}
+/** Solo lettura: id esistente (alias o match automatico >= 0.8), mai creazioni. */
+function exLookupId(name) {
+  const n = exNorm(name);
+  if (!n.key) return null;
+  const a = S.exAlias[n.key];
+  if (a && S.exReg[a]) return a;
+  const m = exBestMatch(n.tokens);
+  return (m.id && m.score >= 0.8) ? m.id : null;
+}
+/** Id esercizio; crea la voce se nuova. Match >= 0.8 automatico; 0.5-0.8 resta "pending" e viene chiesto all'import scheda. */
+function getExId(name) {
+  const n = exNorm(name);
+  if (!n.key) return '';
+  const a = S.exAlias[n.key];
+  if (a && S.exReg[a]) return a;
+  const m = exBestMatch(n.tokens);
+  if (m.id && m.score >= 0.8) { S.exAlias[n.key] = m.id; return m.id; }
+  const id = n.key;
+  if (!S.exReg[id]) {
+    S.exReg[id] = { name: String(name).trim(), tokens: n.tokens };
+    if (m.id && m.score >= 0.5) S.exReg[id].pending = m.id;
+  }
+  S.exAlias[n.key] = id;
+  return id;
+}
+/** Chiede (una volta) se gli esercizi di questa scheda con somiglianza media sono lo stesso esercizio già noto. */
+function resolvePendingExercises(prog) {
+  if (!prog || !prog.weeks) return;
+  const ids = new Set();
+  prog.weeks.forEach(w => Object.values(w.days || {}).forEach(list => (list || []).forEach(e => {
+    if (e && !e.warm && e.name) { const id = getExId(e.name); if (id) ids.add(id); }
+  })));
+  ids.forEach(id => {
+    const reg = S.exReg[id];
+    if (!reg || !reg.pending) return;
+    const cand = reg.pending;
+    delete reg.pending;
+    if (!S.exReg[cand] || cand === id) return;
+    let same = false;
+    try {
+      same = confirm('Esercizio "' + reg.name + '": è lo stesso di "' + S.exReg[cand].name + '"?\n\nOK = stesso esercizio (storico condiviso)\nAnnulla = esercizio diverso');
+    } catch (e) { }
+    if (same) mergeExercises(id, cand);
+  });
+}
+/** Unisce l'esercizio fromId dentro toId (storico, alias, log di sessione, note, recuperi). */
+function mergeExercises(fromId, toId) {
+  if (!fromId || !toId || fromId === toId || !S.exReg[fromId] || !S.exReg[toId]) return;
+  const from = S.exLog[fromId];
+  if (from) {
+    const to = S.exLog[toId] = S.exLog[toId] || { name: S.exReg[toId].name, mono: false, aliases: [], entries: [] };
+    from.entries.forEach(en => {
+      if (!to.entries.some(x => exSameSession(x, en) && x.date === en.date)) to.entries.push(en);
+    });
+    to.entries.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+    if (to.entries.length > 50) to.entries.length = 50;
+    to.mono = to.mono || from.mono;
+    [from.name].concat(from.aliases || []).forEach(a => { if (a && a !== to.name && !to.aliases.includes(a) && to.aliases.length < 8) to.aliases.push(a); });
+    delete S.exLog[fromId];
+  }
+  Object.keys(S.exAlias).forEach(k => { if (S.exAlias[k] === fromId) S.exAlias[k] = toId; });
+  delete S.exReg[fromId];
+  Object.keys(S.exReg).forEach(r => { if (S.exReg[r].pending === fromId) delete S.exReg[r].pending; });
+  // log di sessione: slot fromId / fromId#n
+  Object.keys(S.accLog || {}).forEach(k => {
+    const row = S.accLog[k];
+    Object.keys(row).forEach(slot => {
+      const base = slot.split('#')[0];
+      if (base !== fromId) return;
+      let ns = toId + slot.slice(fromId.length);
+      if (!row[ns]) row[ns] = row[slot];
+      delete row[slot];
+    });
+  });
+  const renameKeys = (obj, endsWithId) => {
+    Object.keys(obj || {}).forEach(k => {
+      const i = k.lastIndexOf('|');
+      const last = i >= 0 ? k.slice(i + 1) : k;
+      if (last.split('#')[0] !== fromId) return;
+      const nk = (i >= 0 ? k.slice(0, i + 1) : '') + toId + last.slice(fromId.length);
+      if (obj[nk] === undefined) obj[nk] = obj[k];
+      delete obj[k];
+    });
+  };
+  renameKeys(S.exNotes); renameKeys(S.nextLoad);
+  if (S.restByEx && S.restByEx[fromId] != null) {
+    if (S.restByEx[toId] == null) S.restByEx[toId] = S.restByEx[fromId];
+    delete S.restByEx[fromId];
+  }
+  save();
+}
+
+/* ----- helper numerici e formattazione ----- */
+const exNum = v => { if (v === '' || v == null) return null; const x = parseFloat(String(v).replace(',', '.')); return isNaN(x) ? null : x; };
+const exInt = v => { if (v === '' || v == null) return null; const x = parseInt(v, 10); return isNaN(x) ? null : x; };
+const exFmtNum = v => String(v).replace('.', ',');
+function exFmtDate(d) {
+  const m = String(d || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? (m[3] + '/' + m[2]) : String(d || '');
+}
+/** Normalizza le serie per lo storico: bilaterali {kg,reps,rpe?} oppure mono {L:{kg,reps},R:{kg,reps}} */
+function exCleanSets(sets) {
+  const out = [];
+  (sets || []).forEach(s => {
+    if (!s) return;
+    if (s.L || s.R) {
+      const side = sd => sd ? { kg: exNum(sd.kg), reps: exInt(sd.reps) } : { kg: null, reps: null };
+      const L = side(s.L), R = side(s.R);
+      if (L.kg == null && L.reps == null && R.kg == null && R.reps == null) return;
+      out.push({ L, R });
+    } else {
+      const kg = exNum(s.kg), reps = exInt(s.reps);
+      if (kg == null && reps == null) return;
+      const o = { kg, reps };
+      const r = rpeOf(s);
+      if (r != null) o.rpe = r;
+      out.push(o);
+    }
+  });
+  return out;
+}
+/** Serie di una entry convertite per l'esercizio corrente (mono o bilaterale). Valori '' se mancanti. */
+function exConvertSets(sets, mono) {
+  const v = x => (x == null ? '' : x);
+  return (sets || []).map(s => {
+    if (mono) {
+      if (s.L || s.R) {
+        return { L: { kg: v(s.L && s.L.kg), reps: v(s.L && s.L.reps) }, R: { kg: v(s.R && s.R.kg), reps: v(s.R && s.R.reps) } };
+      }
+      return { L: { kg: v(s.kg), reps: v(s.reps) }, R: { kg: v(s.kg), reps: v(s.reps) } };
+    }
+    if (s.L || s.R) {
+      const kgs = [s.L && s.L.kg, s.R && s.R.kg].filter(x => x != null);
+      const reps = [s.L && s.L.reps, s.R && s.R.reps].filter(x => x != null);
+      return { kg: kgs.length ? Math.min.apply(null, kgs) : '', reps: reps.length ? Math.min.apply(null, reps) : '' };
+    }
+    const o = { kg: v(s.kg), reps: v(s.reps) };
+    if (s.rpe != null) o.rpe = s.rpe;
+    return o;
+  });
+}
+/** "3×10 @ 20 kg" (raggruppa serie uguali consecutive); mono: "3× sx 18 kg × 10 / dx 20 kg × 10" */
+function exFmtSets(sets) {
+  const side = x => (x && x.kg != null ? exFmtNum(x.kg) + ' kg' : '—') + ' × ' + (x && x.reps != null ? x.reps : '—');
+  const groups = [];
+  (sets || []).forEach(s => {
+    const mono = !!(s.L || s.R);
+    const txt = mono
+      ? 'sx ' + side(s.L) + ' / dx ' + side(s.R)
+      : (s.reps != null ? s.reps : '—') + (s.kg != null ? ' @ ' + exFmtNum(s.kg) + ' kg' : '');
+    const last = groups[groups.length - 1];
+    if (last && last.txt === txt) last.n++; else groups.push({ txt, n: 1, mono });
+  });
+  return groups.map(g => g.n + (g.mono ? '× ' : '×') + g.txt).join(' + ');
+}
+
+/* ----- sessioni ed entries ----- */
+const exCurProgId = () => (S.prog && S.prog.id) || '';
+function exCur(week, day) { return { progId: exCurProgId(), week: week, day: day, date: dstr() }; }
+/** stessa sessione = stessa scheda + settimana + giorno (i complementari 'comp' anche stessa data) */
+function exSameSession(a, b) {
+  if (String(a.progId || '') !== String(b.progId || '')) return false;
+  if (String(a.week) !== String(b.week)) return false;
+  if (String(a.day) !== String(b.day)) return false;
+  if (String(a.day) === 'comp') return a.date === b.date;
+  return true;
+}
+function exUpsertEntry(id, name, entry, opts) {
+  opts = opts || {};
+  if (!id) return;
+  const raw = String(name || '').trim();
+  const rec = S.exLog[id] = S.exLog[id] || { name: (S.exReg[id] && S.exReg[id].name) || raw || id, mono: false, aliases: [], entries: [] };
+  if (raw && !opts.keepName) rec.name = raw;
+  if (raw && raw !== rec.name && !rec.aliases.includes(raw) && rec.aliases.length < 8) rec.aliases.push(raw);
+  if (entry.sets.some(s => s.L || s.R)) rec.mono = true;
+  const idx = rec.entries.findIndex(en => exSameSession(en, entry)
+    || (!entry.progId && String(en.week) === String(entry.week) && String(en.day) === String(entry.day) && en.date === entry.date));
+  if (idx >= 0) {
+    if (opts.keepExisting) return;
+    rec.entries.splice(idx, 1);
+  }
+  rec.entries.unshift(entry);
+  rec.entries.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  if (rec.entries.length > 50) rec.entries.length = 50;
+}
+function exEntriesFor(name) {
+  const id = exLookupId(name);
+  return (id && S.exLog[id] && S.exLog[id].entries) || [];
+}
+/** Ultima volta che l'esercizio è stato fatto (qualunque scheda), esclusa la sessione corrente */
+function lastExEntry(name, week, day) {
+  const cur = exCur(week, day);
+  return exEntriesFor(name).find(en => !exSameSession(en, cur)) || null;
+}
+function exRemoveSession(progId, week, day) {
+  Object.keys(S.exLog).forEach(id => {
+    const rec = S.exLog[id];
+    rec.entries = rec.entries.filter(en => !(String(en.progId || '') === String(progId || '') && String(en.week) === String(week) && String(en.day) === String(day)));
+  });
+}
+function exRemoveWeek(progId, week) {
+  Object.keys(S.exLog).forEach(id => {
+    const rec = S.exLog[id];
+    rec.entries = rec.entries.filter(en => !(String(en.progId || '') === String(progId || '') && String(en.week) === String(week)));
+  });
+}
+function exIngestWorkout(w) {
+  if (!w || entryType(w) !== 'train' || !Array.isArray(w.exercises)) return;
+  w.exercises.forEach(e => {
+    if (!e || e.warm || !e.name) return;
+    const sets = exCleanSets(e.sets);
+    if (!sets.length) return;
+    const id = getExId(e.name);
+    if (!id) return;
+    const en = { date: w.date || dstr(), progId: w.progId || '', week: w.week || '', day: w.day, sets };
+    if (e.note) en.note = e.note;
+    if (e.nextKg != null) { en.nextKg = e.nextKg; en.nextNote = e.nextNote || ''; }
+    exUpsertEntry(id, e.name, en, { keepExisting: true });
+  });
+}
+
+/* ----- chiavi di sessione: progId + settimana + giorno, slot = exId (non più l'indice) ----- */
+const accKeyFor = (progId, week, day) => (progId || '') + '|' + week + '|' + day;
+const accKey = (week, day) => accKeyFor(exCurProgId(), week, day);
+/** slot dell'esercizio i-esimo di quel giorno: exId (+ #n se lo stesso esercizio compare più volte) */
+function accSlot(week, day, i) {
+  try {
+    const wObj = S.prog && S.prog.weeks && S.prog.weeks.find(x => x.label === week);
+    const list = wObj && dayExercises(wObj, day);
+    const ex = list && list[i];
+    if (ex && ex.name) {
+      const id = getExId(ex.name);
+      if (id) {
+        let occ = 0;
+        for (let j = 0; j < i; j++) if (list[j] && list[j].name && getExId(list[j].name) === id) occ++;
+        return occ ? id + '#' + occ : id;
+      }
+    }
+  } catch (e) { }
+  return 'i' + i;
+}
+
+/* ----- riconoscimento scheda ----- */
+function normFileName(fn) {
+  let s = String(fn || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  s = s.replace(/\.docx?$/i, '').replace(/_+/g, ' ');
+  s = s.replace(/\(\s*\d+\s*\)/g, ' ');
+  s = s.replace(/\b(copia|copy|final|finale|nuovo|nuova|new|aggiornat[oa]|agg|rev|revisione)\b/g, ' ');
+  s = s.replace(/\b(v|ver|versione)\s*\.?\s*\d+(\.\d+)*\b/g, ' ');
+  s = s.replace(/\b\d{4}[-_.\/]\d{1,2}[-_.\/]\d{1,2}\b/g, ' ');
+  s = s.replace(/\b\d{1,2}[-_.\/]\d{1,2}[-_.\/]\d{2,4}\b/g, ' ');
+  return s.replace(/[^a-z0-9]+/g, ' ').trim();
+}
+function jaccardSets(a, b) {
+  const A = new Set(a), B = new Set(b);
+  if (!A.size || !B.size) return 0;
+  let inter = 0; A.forEach(x => { if (B.has(x)) inter++; });
+  return inter / (A.size + B.size - inter);
+}
+function progFingerprint(prog) {
+  const ids = new Set();
+  ((prog && prog.weeks) || []).forEach(w => Object.values(w.days || {}).forEach(list => (list || []).forEach(e => {
+    if (e && e.name && !e.warm) { const id = getExId(e.name); if (id) ids.add(id); }
+  })));
+  return [...ids];
+}
+/** Cerca tra le schede note quella che somiglia a `prog`. Restituisce {p, nameSim, fpSim, auto} oppure null. */
+function matchKnownProg(prog) {
+  const fp = progFingerprint(prog);
+  const nameTok = normFileName(prog.fileName || prog.name).split(' ').filter(Boolean);
+  let best = null;
+  allKnownProgs().forEach(p => {
+    if (!p || !p.id) return;
+    const exact = String(p.fileName || '').toLowerCase() === String(prog.fileName || '').toLowerCase();
+    const nameSim = exact ? 1 : jaccardSets(nameTok, normFileName(p.fileName || p.name).split(' ').filter(Boolean));
+    const fpSim = jaccardSets(fp, progFingerprint(p));
+    const nameOk = nameSim >= 0.8, fpOk = fpSim >= 0.7;
+    if (!nameOk && !fpOk) return;
+    const cand = { p, nameSim, fpSim, auto: nameOk && fpOk, score: (nameOk && fpOk ? 10 : 0) + nameSim + fpSim };
+    if (!best || cand.score > best.score) best = cand;
+  });
+  return best;
+}
+const newProgId = () => 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+/* ----- backup e salvataggio ----- */
+function exportBackupJson() {
+  try {
+    const blob = new Blob([JSON.stringify(S)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'powerlifting-backup-' + dstr() + '.json';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  } catch (e) { alert('Backup non riuscito: ' + (e && e.message ? e.message : e)); }
+}
+
+/* ----- migrazione a schemaV 2 (idempotente) ----- */
+function migrateSessionKeys() {
+  const p = S.prog;
+  if (!p || !p.weeks) return;
+  ensureProgMeta(p);
+  const pid = p.id || '';
+  const labels = new Set(p.weeks.map(w => w.label));
+  const loggedByOther = (week, day) => {
+    const wl = S.workoutLog || [];
+    const mine = wl.some(w => String(w.week) === String(week) && String(w.day) === String(day) && w.progId === pid);
+    const other = wl.some(w => String(w.week) === String(week) && String(w.day) === String(day) && w.progId && w.progId !== pid);
+    return other && !mine;
+  };
+  Object.keys(S.accLog || {}).forEach(k => {
+    const parts = k.split('|');
+    if (parts.length !== 2 || !labels.has(parts[0])) return;   // già nuovo formato o altra scheda
+    const week = parts[0], day = parts[1];
+    if (!loggedByOther(week, day)) {
+      const nk = accKeyFor(pid, week, day);
+      const dest = S.accLog[nk] = S.accLog[nk] || {};
+      Object.keys(S.accLog[k] || {}).forEach(ii => {
+        const slot = accSlot(week, day, Number(ii));
+        if (!dest[slot]) dest[slot] = S.accLog[k][ii];
+      });
+    }
+    delete S.accLog[k];
+  });
+  Object.keys(S.exNotes || {}).forEach(k => {
+    const parts = k.split('|');
+    if (parts.length !== 3 || !labels.has(parts[0])) return;
+    if (!loggedByOther(parts[0], parts[1])) {
+      const nk = pid + '|' + parts[0] + '|' + parts[1] + '|' + accSlot(parts[0], parts[1], Number(parts[2]));
+      if (S.exNotes[nk] === undefined) S.exNotes[nk] = S.exNotes[k];
+    }
+    delete S.exNotes[k];
+  });
+  Object.keys(S.nextLoad || {}).forEach(k => {
+    const parts = k.split('|');
+    if (parts.length === 1) { delete S.nextLoad[k]; return; }   // vecchia chiave generale: il piano ora vive nelle entry
+    if (parts.length !== 3 || !labels.has(parts[0])) return;
+    if (!loggedByOther(parts[0], parts[1])) {
+      const nk = pid + '|' + parts[0] + '|' + parts[1] + '|' + getExId(parts[2]);
+      if (S.nextLoad[nk] === undefined) S.nextLoad[nk] = S.nextLoad[k];
+    }
+    delete S.nextLoad[k];
+  });
+}
+function migrateToV2() {
+  if ((S.schemaV || 0) >= 2) return;
+  let backup = null;
+  try { backup = JSON.stringify(S); } catch (e) { return; }
+  try {
+    const hasData = (S.workoutLog || []).length || Object.keys(S.liftHistory || {}).length || Object.keys(S.accLog || {}).length;
+    if (hasData && typeof confirm === 'function' && confirm('Aggiornamento del registro esercizi.\n\nVuoi scaricare prima un backup (.json) dei tuoi dati?\n\nOK = scarica il backup, Annulla = continua senza')) {
+      exportBackupJson();
+    }
+    // 1) storico allenamenti -> log per esercizio (dal più vecchio, così l'ordine finale è corretto)
+    (S.workoutLog || []).slice().reverse().forEach(w => exIngestWorkout(w));
+    // 2) vecchio liftHistory (solo ciò che non è già coperto)
+    Object.keys(S.liftHistory || {}).forEach(key => {
+      const id = getExId(key);
+      if (!id) return;
+      (S.liftHistory[key] || []).slice().reverse().forEach(h => {
+        const sets = exCleanSets(h.sets || ((h.kg != null || h.reps != null) ? [{ kg: h.kg, reps: h.reps }] : []));
+        if (!sets.length) return;
+        const wl = (S.workoutLog || []).find(w => String(w.week) === String(h.week) && String(w.day) === String(h.day) && w.date === h.date);
+        const en = { date: h.date || dstr(), progId: (wl && wl.progId) || '', week: h.week || '', day: h.day, sets };
+        if (h.note) en.note = h.note;
+        if (h.nextKg != null) { en.nextKg = h.nextKg; en.nextNote = h.nextNote || ''; }
+        exUpsertEntry(id, '', en, { keepExisting: true, keepName: true });
+      });
+    });
+    // 3) chiavi di sessione della scheda attuale
+    migrateSessionKeys();
+    // 4) tempi di recupero per exId
+    Object.keys(S.restByEx || {}).forEach(k => {
+      const id = getExId(k);
+      if (id && id !== k) { if (S.restByEx[id] == null) S.restByEx[id] = S.restByEx[k]; delete S.restByEx[k]; }
+    });
+    S.schemaV = 2;
+    save();
+  } catch (e) {
+    console.error('Migrazione v2 fallita, ripristino', e);
+    try { S = JSON.parse(backup); } catch (e2) { }
+  }
+}
+
 /** Fondamentali + varianti (panca paralimpica, squat con fermi, stacco sumo, ecc.) */
 function isMainLift(e) {
   if (!e) return false;
@@ -749,7 +1206,7 @@ function isAccessory(e) {
 function isMonolateral(e) {
   if (!e) return false;
   const t = (String(e.name || '') + ' ' + String(e.text || '')).toLowerCase();
-  return /monolaterale|mono\s*laterale|unilateral/.test(t);
+  return /monolaterale|mono\s*laterale|unilateral|\bmono\b/.test(t);
 }
 function ensureMonoSides(setObj) {
   if (!setObj.L) setObj.L = { kg: '', reps: '', done: false };
@@ -761,14 +1218,14 @@ function ensureMonoSides(setObj) {
   return setObj;
 }
 function getRestSec(name) {
-  const k = liftKey(name);
+  const k = exLookupId(name) || liftKey(name);
   if (S.restByEx && S.restByEx[k] != null) return Number(S.restByEx[k]) || 90;
   return Number(S.restDefault) || 120;
 }
 function setRestSec(name, sec) {
   S.restByEx = S.restByEx || {};
   const n = Math.max(15, Math.min(600, parseInt(sec, 10) || 90));
-  S.restByEx[liftKey(name)] = n;
+  S.restByEx[getExId(name) || liftKey(name)] = n;
   save();
 }
 /* ===== Varianti PL: riconoscimento dal testo della scheda ===== */
@@ -1365,18 +1822,19 @@ function prescribedKg(text, lift) {
   return Math.round(pct / 100 * S.max[lift] / 2.5) * 2.5;
 }
 function getExLog(week, day, i, setCount) {
-  const k = week + '|' + day;
+  const k = accKey(week, day);
+  const slot = accSlot(week, day, i);
   S.accLog = S.accLog || {};
   S.accLog[k] = S.accLog[k] || {};
-  let row = S.accLog[k][i];
+  let row = S.accLog[k][slot];
   // migrazione vecchio formato {kg,reps}
   if (row && !Array.isArray(row.sets) && (row.kg != null || row.reps != null)) {
     row = { sets: [{ kg: row.kg || '', reps: row.reps || '' }] };
-    S.accLog[k][i] = row;
+    S.accLog[k][slot] = row;
   }
   if (!row || !Array.isArray(row.sets)) {
     row = { sets: [] };
-    S.accLog[k][i] = row;
+    S.accLog[k][slot] = row;
   }
   const n = Math.max(1, setCount || row.sets.length || 3);
   while (row.sets.length < n) row.sets.push({ kg: '', reps: '', done: false });
@@ -1602,168 +2060,104 @@ function prevWeekLabel(currentLabel) {
   if (i > 0) return S.prog.weeks[i - 1].label;
   return null;
 }
-/** Serie loggate per un esercizio (stesso giorno) nella settimana precedente o nello storico */
-function findPrevAccessorySets(exerciseName, currentWeek, day) {
+/** Ultima volta (qualsiasi scheda) in cui l'esercizio è stato fatto, già convertita per mono/bilaterale. */
+function findPrevAccessorySets(exerciseName, currentWeek, day, mono) {
   if (!exerciseName) return null;
-  const key = liftKey(exerciseName);
-  const dayN = Number(day);
-
-  // 1) stesso giorno nella settimana precedente del programma
-  const prev = prevWeekLabel(currentWeek);
-  if (prev) {
-    const wPrev = S.prog.weeks.find(w => w.label === prev);
-    if (wPrev) {
-      const exs = dayExercises(wPrev, dayN);
-      if (exs && exs.length) {
-        const idx = exs.findIndex(e => !e.warm && liftKey(e.name) === key);
-        if (idx >= 0) {
-          const info = parseSets(exs[idx].text);
-          const log = getExLog(prev, dayN, idx, info.count);
-          const sets = (log.sets || []).filter(s =>
-            (s.kg !== '' && s.kg != null) || (s.reps !== '' && s.reps != null)
-          );
-          if (sets.length) {
-            return {
-              week: prev,
-              sets: log.sets.map(s => ({
-                kg: s.kg !== '' && s.kg != null ? s.kg : '',
-                reps: s.reps !== '' && s.reps != null ? s.reps : '',
-              })),
-            };
-          }
-        }
-      }
-    }
-    // prova anche workoutLog della settimana precedente
-    const fromLog = (S.workoutLog || []).find(w =>
-      w.week === prev && Number(w.day) === dayN &&
-      (w.exercises || []).some(e => liftKey(e.name) === key && e.sets && e.sets.some(x => x.kg != null || x.reps != null))
-    );
-    if (fromLog) {
-      const ex = fromLog.exercises.find(e => liftKey(e.name) === key);
-      if (ex && ex.sets && ex.sets.length) {
-        return {
-          week: prev,
-          sets: ex.sets.map(s => ({
-            kg: s.kg != null ? s.kg : '',
-            reps: s.reps != null ? s.reps : '',
-          })),
-        };
-      }
-    }
-  }
-
-  // 2) fallback: liftHistory (stesso day se possibile)
-  const hist = lastLiftHistory(exerciseName, 15);
-  const entry = hist.find(h => h.week && h.week !== currentWeek && (h.day == null || Number(h.day) === dayN))
-    || hist.find(h => h.week !== currentWeek)
-    || hist[0];
-  if (entry && entry.sets && entry.sets.length) {
-    return {
-      week: entry.week || entry.date || 'scorsa',
-      sets: entry.sets.map(s => ({
-        kg: s.kg != null ? s.kg : '',
-        reps: s.reps != null ? s.reps : '',
-      })),
-    };
-  }
-  // vecchio formato storico senza sets
-  if (entry && (entry.kg != null || entry.reps != null)) {
-    return {
-      week: entry.week || entry.date || 'scorsa',
-      sets: [{ kg: entry.kg != null ? entry.kg : '', reps: entry.reps != null ? entry.reps : '' }],
-    };
-  }
-  return null;
+  const en = lastExEntry(exerciseName, currentWeek, day);
+  if (!en || !en.sets || !en.sets.length) return null;
+  const other = en.progId && String(en.progId) !== String(exCurProgId());
+  return {
+    week: en.week || '',
+    date: en.date,
+    label: exFmtDate(en.date) + (other ? ' · altra scheda' : ''),
+    sets: exConvertSets(en.sets, !!mono),
+  };
 }
 /**
- * Solo complementari: se i campi di questa settimana sono vuoti,
- * precompila con kg/rip della stessa giornata della settimana prima.
- * Non sovrascrive valori già inseriti.
+ * Solo complementari: se i campi di questa sessione sono vuoti, precompila con kg/rip
+ * dell'ultima volta (anche di un'altra scheda). Mono: sx e dx separati. Non sovrascrive nulla.
  */
 function prefillAccessoryFromPrev(weekLabel, day, exIndex, exercise) {
   if (!exercise || exercise.warm || isMainLift(exercise)) return null;
+  const mono = isMonolateral(exercise);
   const planned = getPlannedLoad(exercise.name, weekLabel, day);
-  const prev = findPrevAccessorySets(exercise.name, weekLabel, day);
+  const prev = findPrevAccessorySets(exercise.name, weekLabel, day, mono);
   const info = parseSets(exercise.text);
   const log = getExLog(weekLabel, day, exIndex, info.count);
+  const empty = v => v === '' || v == null;
   let changed = false;
   log.sets.forEach((s, si) => {
-    const p = (prev && prev.sets) ? (prev.sets[si] || prev.sets[Math.min(si, prev.sets.length - 1)]) : null;
-    if (s.kg === '' || s.kg == null) {
-      if (planned && planned.kg != null) {
-        s.kg = String(planned.kg);
-        changed = true;
-      } else if (p && p.kg !== '' && p.kg != null) {
-        s.kg = p.kg;
-        changed = true;
-      }
+    const p = (prev && prev.sets) ? (prev.sets[si] || prev.sets[prev.sets.length - 1]) : null;
+    if (mono) {
+      ensureMonoSides(s);
+      ['L', 'R'].forEach(side => {
+        const sd = s[side];
+        const ps = p && p[side];
+        if (sd.done) return;
+        if (empty(sd.kg)) {
+          if (planned && planned.kg != null) { sd.kg = String(planned.kg); changed = true; }
+          else if (ps && !empty(ps.kg)) { sd.kg = String(ps.kg); changed = true; }
+        }
+        if (empty(sd.reps) && ps && !empty(ps.reps)) { sd.reps = String(ps.reps); changed = true; }
+      });
+      return;
     }
-    if ((s.reps === '' || s.reps == null) && p && p.reps !== '' && p.reps != null) {
-      s.reps = p.reps;
-      changed = true;
+    if (empty(s.kg)) {
+      if (planned && planned.kg != null) { s.kg = String(planned.kg); changed = true; }
+      else if (p && !empty(p.kg)) { s.kg = String(p.kg); changed = true; }
     }
+    if (empty(s.reps) && p && !empty(p.reps)) { s.reps = String(p.reps); changed = true; }
   });
   if (changed) save();
-  return prev || (planned ? { week: planned.week, sets: [{ kg: planned.kg }] } : null);
+  if (prev) return prev;
+  return planned ? { week: planned.week, label: exFmtDate(planned.date), sets: [{ kg: planned.kg, reps: '' }] } : null;
 }
+/** Scrive nel log per esercizio (indipendente dalla scheda). Una entry per scheda+settimana+giorno. */
 function pushLiftHistory(name, sets, week, day, optNextKg, optNextNote, optNote) {
-  const clean = (sets || []).map(s => ({
-    kg: parseFloat(String(s.kg).replace(',', '.')),
-    reps: parseInt(s.reps, 10)
-  })).filter(s => !isNaN(s.kg) && !isNaN(s.reps));
+  const clean = exCleanSets(sets);
   if (!clean.length) return;
-  const key = liftKey(name);
-  S.liftHistory = S.liftHistory || {};
-  S.liftHistory[key] = S.liftHistory[key] || [];
-  S.liftHistory[key] = S.liftHistory[key].filter(h => h.date !== dstr() || (week && h.week !== week));
-  const entry = { date: dstr(), sets: clean, week: week || '', day: day };
+  const id = getExId(name);
+  if (!id) return;
+  const entry = { date: dstr(), progId: exCurProgId(), week: week || '', day: day, sets: clean };
   const nk = (optNextKg != null) ? { kg: optNextKg, note: optNextNote || '' } : getNextLoadPlan(name, week, day);
   if (nk && nk.kg != null) {
     entry.nextKg = nk.kg;
     entry.nextNote = nk.note || '';
   }
-  if (optNote) {
-    entry.note = optNote;
-  }
-  S.liftHistory[key].unshift(entry);
-  if (S.liftHistory[key].length > 40) S.liftHistory[key].length = 40;
+  if (optNote) entry.note = optNote;
+  exUpsertEntry(id, name, entry);
 }
 function lastLiftHistory(name, n) {
-  const list = (S.liftHistory && S.liftHistory[liftKey(name)]) || [];
-  return list.slice(0, n || 5);
+  return exEntriesFor(name).slice(0, n || 5);
 }
-/** Trova il carico pianificato per la prossima volta dallo storico precedente */
+/** Carico pianificato "per la prossima volta" nell'ultima sessione dell'esercizio (qualsiasi scheda) */
 function getPlannedLoad(name, currentWeek, currentDay) {
-  const hist = lastLiftHistory(name, 15);
-  for (const h of hist) {
-    const isSame = (currentWeek && h.week === currentWeek && (currentDay == null || h.day == currentDay));
-    if (!isSame && h.nextKg != null) {
-      return { kg: h.nextKg, note: h.nextNote || '', date: h.date, week: h.week, day: h.day };
-    }
-  }
-  for (const w of (S.workoutLog || [])) {
-    const isSame = (currentWeek && w.week === currentWeek && (currentDay == null || w.day == currentDay));
-    if (!isSame && w.exercises) {
-      for (const e of w.exercises) {
-        if (liftKey(e.name) === liftKey(name) && e.nextKg != null) {
-          return { kg: e.nextKg, note: e.nextNote || '', date: w.date, week: w.week, day: w.day };
-        }
-      }
-    }
+  const cur = exCur(currentWeek, currentDay);
+  const en = exEntriesFor(name).find(x => !exSameSession(x, cur));
+  if (en && en.nextKg != null) {
+    return { kg: en.nextKg, note: en.nextNote || '', date: en.date, week: en.week, day: en.day };
   }
   return null;
 }
-function historyHtml(name) {
-  const rows = lastLiftHistory(name, 4);
-  if (!rows.length) return '<p class="hist mut">Nessuno storico ancora</p>';
-  return '<div class="hist">' + rows.map(h => {
-    const sets = h.sets || (h.kg != null ? [{ kg: h.kg, reps: h.reps }] : []);
-    const txt = sets.map(s => s.kg + '×' + s.reps).join(', ');
-    const nxt = h.nextKg != null ? ` <span class="hist-next">→ ${h.nextKg} kg</span>` : '';
-    const noteTxt = h.note ? ` <span class="hist-note-badge" title="${esc(h.note)}">📝</span>` : '';
-    return `<span class="hist-row"><b>${esc(txt)}</b>${nxt}${noteTxt} <i>${esc(String(h.date || '')).slice(5)}</i></span>`;
-  }).join('') + '</div>';
+function historyHtml(name, week, day) {
+  const all = exEntriesFor(name);
+  if (!all.length) return '<p class="hist mut">Nessuno storico ancora</p>';
+  const cur = (week != null) ? exCur(week, day) : null;
+  const prev = cur ? all.find(en => !exSameSession(en, cur)) : null;
+  const nextHtml = h => h.nextKg != null ? ` <span class="hist-next">→ ${esc(String(h.nextKg))} kg</span>` : '';
+  let html = '';
+  if (prev) {
+    const other = prev.progId && String(prev.progId) !== String(exCurProgId());
+    html += `<div class="hist-last">Volta scorsa <i>${esc(exFmtDate(prev.date) + (other ? ' · altra scheda' : ''))}</i>: <b>${esc(exFmtSets(prev.sets))}</b>${nextHtml(prev)}</div>`;
+  }
+  const rest = all.filter(en => en !== prev).slice(0, prev ? 3 : 4);
+  if (rest.length) {
+    html += '<div class="hist">' + rest.map(h => {
+      const noteTxt = h.note ? ` <span class="hist-note-badge" title="${esc(h.note)}">📝</span>` : '';
+      return `<span class="hist-row"><b>${esc(exFmtSets(h.sets))}</b>${nextHtml(h)}${noteTxt} <i>${esc(exFmtDate(h.date))}</i></span>`;
+    }).join('') + '</div>';
+  }
+  return html;
 }
 function saveSessionLogs(week, day, exercises) {
   if (!exercises) return;
@@ -1806,7 +2200,7 @@ function saveSessionLogs(week, day, exercises) {
   save();
 }
 /* ===== Note per esercizi e pianificazione carico prossima sessione ===== */
-function getExNoteKey(week, day, i) { return week + '|' + day + '|' + i; }
+function getExNoteKey(week, day, i) { return exCurProgId() + '|' + week + '|' + day + '|' + accSlot(week, day, i); }
 function getExNote(week, day, i) {
   return (S.exNotes && S.exNotes[getExNoteKey(week, day, i)]) || '';
 }
@@ -1816,31 +2210,21 @@ function setExNote(week, day, i, text) {
   save();
 }
 function getNextLoadKey(exerciseName, week, day) {
-  if (week != null && day != null) {
-    return week + '|' + day + '|' + liftKey(exerciseName);
-  }
-  return liftKey(exerciseName);
+  return exCurProgId() + '|' + week + '|' + day + '|' + (getExId(exerciseName) || liftKey(exerciseName));
 }
+/** Bozza "aumenta il carico la prossima volta" della sessione in corso; alla chiusura finisce nella entry del log esercizio. */
 function getNextLoadPlan(exerciseName, week, day) {
-  if (!S.nextLoad) return null;
-  if (week != null && day != null) {
-    const specific = S.nextLoad[getNextLoadKey(exerciseName, week, day)];
-    if (specific) return specific;
-  }
-  return S.nextLoad[liftKey(exerciseName)] || null;
+  if (!S.nextLoad || week == null || day == null) return null;
+  return S.nextLoad[getNextLoadKey(exerciseName, week, day)] || null;
 }
 function setNextLoadPlan(exerciseName, increase, kg, note, week, day) {
+  if (week == null || day == null) return;
   S.nextLoad = S.nextLoad || {};
-  const specificKey = (week != null && day != null) ? getNextLoadKey(exerciseName, week, day) : null;
-  const generalKey = liftKey(exerciseName);
-
+  const key = getNextLoadKey(exerciseName, week, day);
   if (!increase) {
-    if (specificKey) delete S.nextLoad[specificKey];
-    delete S.nextLoad[generalKey];
+    delete S.nextLoad[key];
   } else {
-    const obj = { kg: parseFloat(String(kg || 0).replace(',', '.')) || null, note: note || '' };
-    if (specificKey) S.nextLoad[specificKey] = obj;
-    S.nextLoad[generalKey] = obj;
+    S.nextLoad[key] = { kg: parseFloat(String(kg || 0).replace(',', '.')) || null, note: note || '' };
   }
   save();
 }
@@ -1889,7 +2273,13 @@ function applyPlannedLoadToSets(weekLabel, day, exIndex, kg) {
   const log = getExLog(weekLabel, day, exIndex);
   if (!log || !log.sets) return;
   log.sets.forEach(s => {
-    s.kg = String(kg);
+    if (s.L || s.R) {
+      ensureMonoSides(s);
+      if (!s.L.done) s.L.kg = String(kg);
+      if (!s.R.done) s.R.kg = String(kg);
+    } else {
+      s.kg = String(kg);
+    }
   });
   save();
   render();
@@ -2063,7 +2453,12 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
         if (sideDone) return `<div class="mono-side mono-side-done" data-side="${side.key}"><div class="mono-side-label">✓ ${side.label}</div><div class="set-readonly set-done-ro"><span class="set-ro-kg">${kgV ? kgV + ' kg' : '— kg'}</span><span class="set-x">×</span><span class="set-ro-reps">${repV ? repV + ' rip' : '— rip'}</span></div><p class="set-lock-hint">Fatto · tocca per sbloccare</p></div>`;
         return `<div class="mono-side" data-side="${side.key}"><div class="mono-side-label">${side.label} ·${fmtRest(restSec)}</div><div class="set-inputs"><input type="number" inputmode="decimal" step="0.5" placeholder="${esc(String(kgPh))}" value="${kgV}" oninput="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','kg',this.value)" onchange="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','kg',this.value);cascadeMonoKgFromSet(${wJs},${day},${exIndex},${si},'${side.key}')"><span class="set-x">×</span><input type="number" inputmode="numeric" step="1" placeholder="${prescRep != null ? prescRep : 'rip'}" value="${repV}" oninput="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','reps',this.value)" onchange="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','reps',this.value)"></div><p class="set-lock-hint">Tocca qui → fatto + recupero</p></div>`;
       }).join('');
-      inputs = setDoneBar + `<div class="mono-sides">${sidesHtml}</div>`;
+      const pm = prevInfo && prevInfo.sets ? (prevInfo.sets[si] || prevInfo.sets[prevInfo.sets.length - 1]) : null;
+      const hasV = v => v !== '' && v != null;
+      const pmTxt = x => (x && hasV(x.kg) ? esc(String(x.kg)) + ' kg' : '—') + ' × ' + (x && hasV(x.reps) ? esc(String(x.reps)) : '—');
+      const monoHint = pm && (pm.L || pm.R) && [pm.L, pm.R].some(x => x && (hasV(x.kg) || hasV(x.reps)))
+        ? `<p class="set-prev-hint">Scorsa (${esc(String(prevInfo.label || prevInfo.week))}): Sx <b>${pmTxt(pm.L)}</b> · Dx <b>${pmTxt(pm.R)}</b></p>` : '';
+      inputs = setDoneBar + `<div class="mono-sides">${sidesHtml}</div>` + monoHint;
     } else if (isDone) {
       const kgShow = (s.kg !== '' && s.kg != null) ? String(s.kg).replace('.', ',') + ' kg' : (prescKg != null ? String(prescKg).replace('.', ',') + ' kg' : '— kg');
       const repShow = (s.reps !== '' && s.reps != null) ? String(s.reps) + ' rip' : (prescRep != null ? String(prescRep) + ' rip' : '— rip');
@@ -2108,7 +2503,7 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
            <p class="set-lock-hint">kg × rip @ RPE sentito · tocca la card quando hai finito</p>`;
     } else {
       const pSet = prevInfo && prevInfo.sets ? (prevInfo.sets[si] || prevInfo.sets[prevInfo.sets.length - 1]) : null;
-      const prevHint = pSet && ((pSet.kg !== '' && pSet.kg != null) || (pSet.reps !== '' && pSet.reps != null)) ? `<p class="set-prev-hint">Scorsa (${esc(String(prevInfo.week))}): <b>${pSet.kg !== '' && pSet.kg != null ? esc(String(pSet.kg)) + ' kg' : '—'} × ${pSet.reps !== '' && pSet.reps != null ? esc(String(pSet.reps)) + ' rip' : '—'}</b> · cerca di migliorare</p>` : '';
+      const prevHint = pSet && ((pSet.kg !== '' && pSet.kg != null) || (pSet.reps !== '' && pSet.reps != null)) ? `<p class="set-prev-hint">Scorsa (${esc(String(prevInfo.label || prevInfo.week))}): <b>${pSet.kg !== '' && pSet.kg != null ? esc(String(pSet.kg)) + ' kg' : '—'} × ${pSet.reps !== '' && pSet.reps != null ? esc(String(pSet.reps)) + ' rip' : '—'}</b> · cerca di migliorare</p>` : '';
       const fromPrev = prevSetKg(log, si);
       const kgVal = s.kg != null && s.kg !== '' ? esc(String(s.kg)) : '';
       const repVal = s.reps != null && s.reps !== '' ? esc(String(s.reps)) : (!repsEditable && prescRep != null ? String(prescRep) : '');
@@ -2590,13 +2985,37 @@ async function imp(inp) {
   try {
     const file = inp.files[0];
     if (!file) return;
+    const prevProg = S.prog;
     // archivia scheda attuale (lo storico allenamenti NON si cancella)
     if (S.prog) archiveProg(S.prog);
     const prog = await parseDocx(file);
-    ensureProgMeta(prog, file.name);
+    prog.fileName = /\.docx$/i.test(file.name) ? file.name : (file.name + '.docx');
+    prog.name = prog.fileName.replace(/\.docx$/i, '');
+    // stessa scheda (aggiornamento) o scheda nuova? nome file simile e/o esercizi in comune
+    const m = matchKnownProg(prog);
+    let reuse = false;
+    if (m) {
+      if (m.auto) reuse = true;
+      else {
+        const why = m.nameSim >= 0.8 ? 'il nome del file è simile' : 'gli esercizi coincidono al ' + Math.round(m.fpSim * 100) + '%';
+        try {
+          reuse = confirm('Questa scheda somiglia a «' + (m.p.name || m.p.fileName) + '» (' + why + ').\n\nOK = aggiornamento della stessa scheda (mantengo i log)\nAnnulla = scheda nuova');
+        } catch (e) { reuse = false; }
+      }
+    }
+    if (reuse) {
+      prog.id = m.p.id;
+      if (m.p.name) prog.name = m.p.name;
+      if (m.p.fileName) prog.fileName = m.p.fileName;
+    } else {
+      prog.id = newProgId();
+    }
+    ensureProgMeta(prog);
+    resolvePendingExercises(prog);
+    const same = !!(prevProg && prevProg.id === prog.id);
     S.prog = prog;
     archiveProg(S.prog); // anche la nuova entra nel catalogo
-    S.wi = 0;
+    S.wi = same ? Math.max(0, Math.min(S.wi || 0, prog.weeks.length - 1)) : 0;
     S.chk = {};
     S.today = null;
     // Piano ricostruito dallo storico (pallini allenamenti + rest)
@@ -2750,10 +3169,11 @@ function logFinishedWorkout(weekLabel, day, weekdayOverride) {
   const ck = S.chk[k] || [];
   if (S.prog) { ensureProgMeta(S.prog); archiveProg(S.prog); }
   const wd = weekdayOverride != null ? Number(weekdayOverride) : weekdayMon0();
-  const _keepAcc = S.accLog && S.accLog[k] ? JSON.parse(JSON.stringify(S.accLog[k])) : null;
+  const _ak = accKey(weekLabel, day);
+  const _keepAcc = S.accLog && S.accLog[_ak] ? JSON.parse(JSON.stringify(S.accLog[_ak])) : null;
   removeWorkoutLogByWeekDay(weekLabel, day, S.prog && S.prog.id);
   removeStoricoByWeekWeekday(weekLabel, wd, S.prog && S.prog.id);
-  if (_keepAcc) { S.accLog = S.accLog || {}; S.accLog[k] = _keepAcc; }
+  if (_keepAcc) { S.accLog = S.accLog || {}; S.accLog[_ak] = _keepAcc; }
 
   const entry = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
@@ -2852,8 +3272,10 @@ function deleteWorkoutLog(id) {
   S.workoutLog = (S.workoutLog || []).filter(x => x.id !== id);
   if (entry && entry.week != null && entry.day != null && entry.day !== 'comp') {
     const k = entry.week + '|' + entry.day;
+    const _pid = entry.progId || exCurProgId();
     if (S.chk) delete S.chk[k];
-    if (S.accLog) delete S.accLog[k];
+    if (S.accLog) delete S.accLog[accKeyFor(_pid, entry.week, entry.day)];
+    exRemoveSession(_pid, entry.week, entry.day);
   }
   rebuildPianoFromStorico();
   save();
@@ -3021,7 +3443,7 @@ function renderTrainSession(week, day) {
   const list = ex.map((e, i) => {
     const acc = isAccessory(e);
     const rest = !e.warm ? getRestSec(e.name) : 0;
-    const hist = !e.warm ? historyHtml(e.name) : '';
+    const hist = !e.warm ? historyHtml(e.name, week.label, d) : '';
     const nmJs = JSON.stringify(e.name);
     const timerBtn = !e.warm
       ? `<div class="rest-row">
@@ -3322,6 +3744,7 @@ function importWorkoutCsvFile(input) {
         S.workoutLog = toAdd.concat(S.workoutLog || []);
         if (S.workoutLog.length > 200) S.workoutLog.length = 200;
       }
+      workouts.forEach(w => { try { exIngestWorkout(w); } catch (e) { } });
       rebuildPianoFromStorico();
       save();
       render();
@@ -3534,7 +3957,7 @@ function piano() {
   </div>
   <h1>Settimane</h1>${S.prog.weeks.map((w, i) => `${makeEditCard(w.label)}<div class="wk ${i === S.wi ? 'cur' : ''} ${S.dayEdit && S.dayEdit.week === w.label ? 'wk-editing' : ''}" onclick="S.wi=${i};save();render()"><div class="wk-top"><b>${esc(w.label)}</b><button class="res-btn" onclick="resetWk('${w.label}', event)">❌</button></div>${weekDots(w)}</div>`).join('')}
   <p class="mut">Tocca un giorno (Lun–Dom) per impostare allenamento o riposo. Rosso = allenamento · blu = riposo · grigio = non registrato.</p>
-  <h1>Nuova scheda</h1><div class="card"><label class="btn" style="margin:0;cursor:pointer">🔄 Cambia file della scheda<input type="file" accept=".docx" style="display:none" onchange="imp(this)"></label><p id="err" class="mut"></p></div>`;
+  <h1>Nuova scheda</h1><div class="card"><label class="btn" style="margin:0;cursor:pointer">🔄 Cambia file della scheda<input type="file" accept=".docx" style="display:none" onchange="imp(this)"></label><button type="button" class="btn" style="margin:10px 0 0" onclick="exportBackupJson()">Scarica backup dati (.json)</button><p id="err" class="mut"></p></div>`;
 }
 function resetWk(label, e) {
   e.stopPropagation();
@@ -3542,7 +3965,9 @@ function resetWk(label, e) {
     if (confirm('Sei ASSOLUTAMENTE sicuro? Questa operazione non può essere annullata e perderai i progressi della settimana.')) {
       S.workoutLog = (S.workoutLog || []).filter(w => String(w.week) !== String(label));
       Object.keys(S.chk || {}).forEach(k => { if (k.startsWith(label + '|')) delete S.chk[k] });
-      Object.keys(S.accLog || {}).forEach(k => { if (k.startsWith(label + '|')) delete S.accLog[k] });
+      const _pre = exCurProgId() + '|' + label + '|';
+      Object.keys(S.accLog || {}).forEach(k => { if (k.startsWith(_pre)) delete S.accLog[k] });
+      exRemoveWeek(exCurProgId(), label);
       rebuildPianoFromStorico();
       save();
       render();
@@ -3744,6 +4169,7 @@ function render() {
 })();
 
 rebuildPianoFromStorico();
+try { migrateToV2(); } catch (e) { console.error(e); }
 render();
 // Espone funzioni usate dagli onclick inline (iOS / strict)
 window.startRest = startRest;
@@ -3785,6 +4211,8 @@ window.compOnNameChange = compOnNameChange;
 window.compApplyPlannedKg = compApplyPlannedKg;
 window.compToggleNext = compToggleNext;
 window.getPlannedLoad = getPlannedLoad;
+window.exportBackupJson = exportBackupJson;
+window.mergeExercises = mergeExercises;
 /* ========== Push Notifications ========== */
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
