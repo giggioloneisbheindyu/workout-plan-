@@ -2015,10 +2015,10 @@ input.kg-suggested {
 .pg-sec { font-weight: 700; font-size: 13px; margin: 16px 0 6px; color: var(--mut); text-transform: uppercase; letter-spacing: 0.04em; }
 .pg-lbl { display: block; font-size: 12px; color: var(--mut); margin: 10px 0 4px; }
 .pg-sheet input[type=text], .pg-sheet input[type=number], .pg-sheet select, .pg-sheet textarea,
-.pg-grid input, .pg-grid3 input, .pg-card-in select, #app .card > select, #app .card .row select { width: 100%; box-sizing: border-box; background: var(--pill); border: 1px solid var(--bd); border-radius: 10px; padding: 10px; color: var(--tx); font: inherit; font-size: 14px; margin: 0; }
+.pg-grid input, .pg-grid3 input, .pg-card-in select, .pg-content select { width: 100%; box-sizing: border-box; background: var(--pill); border: 1px solid var(--bd); border-radius: 10px; padding: 10px; color: var(--tx); font: inherit; font-size: 14px; margin: 0; }
 .pg-sheet textarea { resize: vertical; }
-.pg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
-.pg-grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 6px; }
+.pg-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 6px; }
+.pg-grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 6px; }
 .pg-block { border: 1px solid var(--bd); border-radius: 12px; padding: 10px; margin: 8px 0; }
 .pg-block-head { display: flex; gap: 8px; align-items: center; }
 .pg-x { appearance: none; -webkit-appearance: none; border: 0; background: transparent; color: var(--mut); font-size: 22px; line-height: 1; padding: 0 6px; width: auto; margin: 0; cursor: pointer; }
@@ -2027,11 +2027,11 @@ input.kg-suggested {
 .pg-undo { margin: 4px 0 8px; }
 .pg-ver { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12.5px; padding: 6px 0; border-bottom: 1px solid var(--bd); }
 .pg-ver button { appearance: none; -webkit-appearance: none; border: 1px solid var(--bd); background: var(--pill); color: var(--tx); border-radius: 8px; padding: 6px 10px; font-size: 12px; margin: 0; width: auto; cursor: pointer; }
-.pg-mx-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 6px 0; }
-.pg-mx { border-collapse: collapse; font-size: 12px; min-width: 100%; }
+.pg-mx-wrap { width: 100%; max-width: 100%; isolation: isolate; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 6px 0; }
+.pg-mx { border-collapse: separate; border-spacing: 0; font-size: 12px; min-width: 100%; }
 .pg-mx th, .pg-mx td { border: 1px solid var(--bd); padding: 7px 8px; text-align: left; white-space: nowrap; }
-.pg-mx thead th { background: var(--pill); position: sticky; top: 0; }
-.pg-mx tbody th { background: var(--pill); font-weight: 600; position: sticky; left: 0; }
+.pg-mx thead th { background: var(--pill); position: relative; z-index: 1; }
+.pg-mx tbody th { background: var(--pill); font-weight: 600; position: sticky; left: 0; z-index: 2; }
 .pg-mx td { cursor: pointer; }
 .pg-mx td.mod { box-shadow: inset 3px 0 0 var(--ac); }
 .pg-mx td.pg-mx-empty { color: var(--mut); cursor: default; }
@@ -2039,5 +2039,37 @@ input.kg-suggested {
 .pg-chart { color: var(--tx); margin: 8px 0 2px; }
 .ex-prog-note { font-size: 12px; color: var(--mut); background: var(--pill); border-radius: 8px; padding: 6px 8px; margin: 6px 0; line-height: 1.4; }
 .ex-prog-note b { color: var(--tx); }
-#app .card .row input[type=number], #app .card > input[type=number], #app .card > input[type=text] { width: 100%; box-sizing: border-box; background: var(--pill); border: 1px solid var(--bd); border-radius: 10px; padding: 10px; color: var(--tx); font: inherit; font-size: 14px; margin: 0; }
-#app .card .row { gap: 8px; align-items: center; }
+.pg-content input[type=number], .pg-content input[type=text] { width: 100%; box-sizing: border-box; background: var(--pill); border: 1px solid var(--bd); border-radius: 10px; padding: 10px; color: var(--tx); font: inherit; font-size: 14px; margin: 0; }
+.pg-content .row, .pg-head .row { gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* Programma: containment delle griglie e controlli su schermi stretti. */
+.pg-content, .pg-head, .pg-sheet { min-width: 0; overflow-wrap: anywhere; }
+.pg-grid > *, .pg-grid3 > * { min-width: 0; max-width: 100%; }
+.pg-content .row > *, .pg-head .row > *, .pg-sheet .row > * { flex: 1 1 140px; min-width: 0; }
+.pg-sheet .row { flex-wrap: wrap; }
+.pg-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; margin-top: 10px; font-size: 12px; color: var(--mut); }
+.pg-field input, .pg-field select { display: block; min-width: 0; max-width: 100%; color: var(--tx); }
+.pg-tools { display: grid; gap: 16px; min-width: 0; }
+.pg-tool-section { min-width: 0; padding: 12px; border: 1px solid var(--bd); border-radius: 12px; }
+.pg-tool-section .pg-sec { margin: 0 0 8px; }
+.pg-tool-section .pg-grid, .pg-tool-section .pg-grid3 { margin-top: 0; }
+.pg-ver { flex-wrap: wrap; }
+.pg-ver > span { flex: 1 1 160px; min-width: 0; }
+.pg-ver > button { flex: 0 0 auto; }
+.pg-ex-nm { min-width: 0; overflow-wrap: anywhere; }
+.pg-block-head > select { flex: 1; min-width: 0; }
+.pg-block-head > .pg-x { flex: 0 0 auto; }
+.pg-order input[type=checkbox] { width: auto; padding: 0; vertical-align: middle; }
+/* Solo la colonna dei nomi rimane fissa: non deve coprire le settimane. */
+.pg-mx th:first-child { min-width: 110px; width: 140px; max-width: 140px; white-space: normal; overflow-wrap: anywhere; }
+.pg-mx thead th:first-child { position: sticky; left: 0; z-index: 3; }
+.pg-mx tbody td { position: relative; z-index: 0; }
+.pg-mx th, .pg-mx td { border-width: 0 1px 1px 0; }
+.pg-mx tr > :first-child { border-left-width: 1px; }
+.pg-mx thead th { border-top-width: 1px; }
+@media (max-width: 420px) {
+  .pg-tools .pg-grid, .pg-tools .pg-grid3 { grid-template-columns: minmax(0, 1fr); }
+  .pg-content .row > *, .pg-head .row > *, .pg-sheet .row > * { flex-basis: 100%; }
+  .pg-sheet .pg-grid3 { grid-template-columns: minmax(0, 1fr); }
+  .pg-mx th:first-child { min-width: 96px; width: 112px; max-width: 112px; }
+}

@@ -4750,7 +4750,7 @@ function pgGenerate() {
   const iFrom = Math.max(0, ws.findIndex(w => w.label === (t.genFrom || ws[0].label)));
   let iTo = ws.findIndex(w => w.label === (t.genTo || ws[ws.length - 1].label));
   if (iTo < iFrom) iTo = ws.length - 1;
-  const start = parseFloat(pgNum(t.genStart || '70')), step = parseFloat(pgNum(t.genStep || '2.5'));
+  const start = parseFloat(pgNum(t.genStart ?? '70')), step = parseFloat(pgNum(t.genStep ?? '2.5'));
   const sets = parseInt(t.genSets || '3', 10) || 3, reps = parseInt(t.genReps || '5', 10) || 5;
   if (isNaN(start) || isNaN(step)) { alert('Percentuali non valide.'); return; }
   const labels = ws.slice(iFrom, iTo + 1).map(w => w.label);
@@ -4769,7 +4769,7 @@ function pgGenerate() {
 function pgDeload() {
   const t = _pg.tool, sel = pgSel();
   const label = t.deloadWeek || sel.week;
-  const pctDrop = parseFloat(pgNum(t.deloadPct || '10')) || 0, setsDrop = parseInt(t.deloadSets || '0', 10) || 0;
+  const pctDrop = parseFloat(pgNum(t.deloadPct ?? '10')) || 0, setsDrop = parseInt(t.deloadSets || '0', 10) || 0;
   if (!pgConfirmLocked([label])) return;
   pgEnsureDraft();
   const w = S.progDraft.weeks.find(x => x.label === label);
@@ -5082,7 +5082,7 @@ function pgDayHtml(sel) {
 }
 function pgMatrixHtml(sel) {
   const ws = pgWeeks();
-  let html = `<div class="pg-chips">${pgChip(sel.mainOnly, `pgSetSel('mainOnly', ${!sel.mainOnly})`, 'Solo fondamentali')}</div><div class="pg-mx-wrap"><table class="pg-mx"><thead><tr><th></th>${ws.map(w => `<th>${esc(w.label.replace(/^SETT\s*/i, ''))}</th>`).join('')}</tr></thead><tbody>`;
+  let html = `<div class="pg-chips">${pgChip(sel.mainOnly, `pgSetSel('mainOnly', ${!sel.mainOnly})`, 'Solo fondamentali')}</div><div class="pg-mx-wrap" tabindex="0" role="region" aria-label="Tabella del programma, scorri orizzontalmente"><table class="pg-mx"><thead><tr><th></th>${ws.map(w => `<th>${esc(w.label.replace(/^SETT\s*/i, ''))}</th>`).join('')}</tr></thead><tbody>`;
   pgDays(ws).forEach(d => {
     const sids = [], seen = new Set();
     ws.forEach(w => (dayExercises(w, d) || []).forEach(e => { if (!seen.has(e.sid)) { seen.add(e.sid); sids.push(e.sid); } }));
@@ -5116,7 +5116,7 @@ function pgStatsTableHtml() {
   const ton = stats.some(x => x.s.ton);
   return `<div class="pg-chart"><svg viewBox="0 0 ${W} ${H + 20}" width="100%" height="${H + 20}" preserveAspectRatio="xMinYMid meet" role="img" aria-label="${ton ? 'Tonnellaggio' : 'Serie'} per settimana">${bars}</svg></div>
     <p class="mut pg-small">${ton ? 'Barre: tonnellaggio dei fondamentali a percentuale (kg)' : 'Barre: serie totali'}</p>
-    <div class="pg-mx-wrap"><table class="pg-mx"><thead><tr><th>Sett.</th><th>Serie</th><th>Tonn.</th><th>Int. media</th></tr></thead><tbody>${stats.map(x => `<tr><th>${esc(x.label)}</th><td>${x.s.sets}</td><td>${x.s.ton ? Math.round(x.s.ton) : '—'}</td><td>${x.s.avg != null ? x.s.avg.toFixed(1) + '%' : '—'}</td></tr>`).join('')}</tbody></table></div>`;
+    <div class="pg-mx-wrap" tabindex="0" role="region" aria-label="Tabella del programma, scorri orizzontalmente"><table class="pg-mx"><thead><tr><th>Sett.</th><th>Serie</th><th>Tonn.</th><th>Int. media</th></tr></thead><tbody>${stats.map(x => `<tr><th>${esc(x.label)}</th><td>${x.s.sets}</td><td>${x.s.ton ? Math.round(x.s.ton) : '—'}</td><td>${x.s.avg != null ? x.s.avg.toFixed(1) + '%' : '—'}</td></tr>`).join('')}</tbody></table></div>`;
 }
 function pgStatsHtml() {
   const m = _pg.max || S.max || {};
@@ -5125,37 +5125,60 @@ function pgStatsHtml() {
 }
 function pgToolsHtml(sel) {
   const ws = pgWeeks(), t = _pg.tool;
+  if (!ws.length) return '<p class="mut">Nessuna settimana disponibile. Crea una nuova scheda.</p><button type="button" class="btn" onclick="pgNewProgram()">Nuova scheda vuota</button>';
   const wopt = (cur, extra) => (extra || '') + ws.map(w => `<option value="${esc(w.label)}" ${w.label === cur ? 'selected' : ''}>${esc(w.label)}</option>`).join('');
+  const field = (label, control) => `<label class="pg-field"><span>${label}</span>${control}</label>`;
+  const number = (key, label, fallback, decimal = false) => field(label, `<input type="number" ${decimal ? 'inputmode="decimal" step="any"' : 'step="1"'} placeholder="${label}" value="${esc(t[key] ?? fallback)}" oninput="pgTool('${key}',this.value)">`);
+  const weeks = (key, label, cur, extra) => field(label, `<select onchange="pgTool('${key}',this.value)">${wopt(cur, extra)}</select>`);
   const days = pgDays(ws);
   const mains = [];
   days.forEach(d => { const seen = new Set(); ws.forEach(w => (dayExercises(w, d) || []).forEach(e => { if (e.lift && !e.warm && !seen.has(e.sid)) { seen.add(e.sid); mains.push({ d, sid: e.sid, name: e.name }); } })); });
   const lint = pgLint(ws);
   const vs = (S.prog && S.prog.versions) || [];
-  return `
-    <div class="pg-sec">Copia</div>
-    <div class="row"><select onchange="pgTool('copyFrom',this.value)">${wopt(t.copyFrom || sel.week)}</select><select onchange="pgTool('copyTo',this.value)">${wopt(t.copyTo, '<option value="__new">Nuova settimana</option>')}</select></div>
-    <div class="row"><button type="button" class="btn" onclick="pgCopyWeek()">Copia settimana</button><select onchange="pgTool('copyDay',this.value)">${days.map(d => `<option value="${d}" ${Number(t.copyDay || sel.day) === d ? 'selected' : ''}>Giorno ${d}</option>`).join('')}</select><button type="button" class="btn" onclick="pgCopyDay()">Copia giorno</button></div>
-    <div class="pg-sec">Generatore di progressione</div>
-    <select onchange="pgTool('genSid',this.value)"><option value="">Esercizio…</option>${mains.map(m => `<option value="${m.d}::${esc(m.sid)}" ${t.genSid === m.d + '::' + m.sid ? 'selected' : ''}>Giorno ${m.d} · ${esc(m.name)}</option>`).join('')}</select>
-    <div class="row"><select onchange="pgTool('genFrom',this.value)">${wopt(t.genFrom || ws[0].label)}</select><select onchange="pgTool('genTo',this.value)">${wopt(t.genTo || ws[ws.length - 1].label)}</select></div>
-    <div class="pg-grid3"><input type="number" inputmode="decimal" placeholder="% inizio" value="${esc(t.genStart || '70')}" oninput="pgTool('genStart',this.value)"><input type="number" inputmode="decimal" placeholder="+% a sett." value="${esc(t.genStep || '2.5')}" oninput="pgTool('genStep',this.value)"><input type="number" placeholder="Serie" value="${esc(t.genSets || '3')}" oninput="pgTool('genSets',this.value)"></div>
-    <input type="number" placeholder="Rip" value="${esc(t.genReps || '5')}" oninput="pgTool('genReps',this.value)">
-    <button type="button" class="btn" onclick="pgGenerate()">Applica progressione</button>
-    <div class="pg-sec">Settimana di scarico</div>
-    <div class="row"><select onchange="pgTool('deloadWeek',this.value)">${wopt(t.deloadWeek || sel.week)}</select><input type="number" placeholder="-% carico" value="${esc(t.deloadPct || '10')}" oninput="pgTool('deloadPct',this.value)"><input type="number" placeholder="-serie" value="${esc(t.deloadSets || '0')}" oninput="pgTool('deloadSets',this.value)"></div>
-    <button type="button" class="btn" onclick="pgDeload()">Applica scarico</button>
-    <div class="pg-sec">Giorni e settimane</div>
-    <div class="row"><button type="button" class="btn" onclick="pgAddDay()">+ Giorno</button><button type="button" class="btn" onclick="pgDelDay()">Elimina Giorno ${sel.day}</button></div>
-    <div class="row"><select onchange="pgTool('delWeek',this.value)">${wopt(t.delWeek || sel.week)}</select><button type="button" class="btn" style="margin-top:0" onclick="pgDelWeek(_pg.tool.delWeek || pgSel().week)">Elimina settimana</button></div>
-    <div class="pg-sec">Controlli (${lint.length})</div>
-    ${lint.length ? '<div class="pg-warn">' + lint.slice(0, 30).map(l => esc(l.week) + ' G' + esc(l.day) + ': ' + esc(l.msg)).join('<br>') + '</div>' : '<p class="mut pg-small">Nessun problema trovato.</p>'}
-    <div class="pg-sec">Versioni</div>
-    ${vs.length ? vs.map((v, i) => `<div class="pg-ver"><span>${esc(new Date(v.ts).toLocaleString('it-IT'))} · ${esc(v.label)}</span><button type="button" onclick="pgRestoreVersion(${i})">Ripristina</button></div>`).join('') : '<p class="mut pg-small">Nessuna versione salvata: se ne crea una a ogni “Applica”.</p>'}
-    <div class="pg-sec">Scheda</div>
-    <button type="button" class="btn" onclick="pgRenameProg()">Rinomina scheda</button>
-    <button type="button" class="btn" onclick="pgRestoreBaseAll()">Ripristina tutto come da coach</button>
-    <button type="button" class="btn" onclick="pgExportDocx()">Esporta .docx</button>
-    <div class="row"><button type="button" class="btn" onclick="pgDuplicateProgram()">Duplica scheda</button><button type="button" class="btn" onclick="pgNewProgram()">Nuova scheda vuota</button></div>`;
+  return `<div class="pg-tools">
+    <section class="pg-tool-section" aria-label="Copia">
+      <h2 class="pg-sec">Copia</h2>
+      <div class="pg-grid">${weeks('copyFrom', 'Da settimana', t.copyFrom || sel.week)}${weeks('copyTo', 'A settimana', t.copyTo || '__new', '<option value="__new">Nuova settimana</option>')}</div>
+      <button type="button" class="btn" onclick="pgCopyWeek()">Copia settimana</button>
+      ${field('Giorno da copiare', `<select onchange="pgTool('copyDay',this.value)">${days.map(d => `<option value="${d}" ${Number(t.copyDay || sel.day) === d ? 'selected' : ''}>Giorno ${d}</option>`).join('')}</select>`)}
+      <button type="button" class="btn" onclick="pgCopyDay()">Copia giorno</button>
+    </section>
+    <section class="pg-tool-section" aria-label="Generatore di progressione">
+      <h2 class="pg-sec">Generatore di progressione</h2>
+      ${field('Esercizio', `<select onchange="pgTool('genSid',this.value)"><option value="">Esercizio…</option>${mains.map(m => `<option value="${m.d}::${esc(m.sid)}" ${t.genSid === m.d + '::' + m.sid ? 'selected' : ''}>Giorno ${m.d} · ${esc(m.name)}</option>`).join('')}</select>`)}
+      <div class="pg-grid">${weeks('genFrom', 'Dalla settimana', t.genFrom || ws[0].label)}${weeks('genTo', 'Alla settimana', t.genTo || ws[ws.length - 1].label)}</div>
+      <div class="pg-grid3">${number('genStart', '% iniziale', '70', true)}${number('genStep', '+% a settimana', '2.5', true)}${number('genSets', 'Serie', '3')}</div>
+      ${number('genReps', 'Ripetizioni', '5')}
+      <button type="button" class="btn" onclick="pgGenerate()">Applica progressione</button>
+    </section>
+    <section class="pg-tool-section" aria-label="Settimana di scarico">
+      <h2 class="pg-sec">Settimana di scarico</h2>
+      ${weeks('deloadWeek', 'Settimana', t.deloadWeek || sel.week)}
+      <div class="pg-grid">${number('deloadPct', '-% carico', '10', true)}${number('deloadSets', '-serie', '0')}</div>
+      <button type="button" class="btn" onclick="pgDeload()">Applica scarico</button>
+    </section>
+    <section class="pg-tool-section" aria-label="Giorni e settimane">
+      <h2 class="pg-sec">Giorni e settimane</h2>
+      <div class="row"><button type="button" class="btn" onclick="pgAddDay()">+ Giorno</button><button type="button" class="btn" onclick="pgDelDay()">Elimina Giorno ${sel.day}</button></div>
+      ${weeks('delWeek', 'Settimana da eliminare', t.delWeek || sel.week)}
+      <button type="button" class="btn" onclick="pgDelWeek(_pg.tool.delWeek || pgSel().week)">Elimina settimana</button>
+    </section>
+    <section class="pg-tool-section" aria-label="Controlli">
+      <h2 class="pg-sec">Controlli (${lint.length})</h2>
+      ${lint.length ? '<div class="pg-warn">' + lint.slice(0, 30).map(l => esc(l.week) + ' G' + esc(l.day) + ': ' + esc(l.msg)).join('<br>') + '</div>' : '<p class="mut pg-small">Nessun problema trovato.</p>'}
+    </section>
+    <section class="pg-tool-section" aria-label="Versioni">
+      <h2 class="pg-sec">Versioni</h2>
+      ${vs.length ? vs.map((v, i) => `<div class="pg-ver"><span>${esc(new Date(v.ts).toLocaleString('it-IT'))} · ${esc(v.label)}</span><button type="button" onclick="pgRestoreVersion(${i})">Ripristina</button></div>`).join('') : '<p class="mut pg-small">Nessuna versione salvata: se ne crea una a ogni “Applica”.</p>'}
+    </section>
+    <section class="pg-tool-section" aria-label="Scheda">
+      <h2 class="pg-sec">Scheda</h2>
+      <button type="button" class="btn" onclick="pgRenameProg()">Rinomina scheda</button>
+      <button type="button" class="btn" onclick="pgRestoreBaseAll()">Ripristina tutto come da coach</button>
+      <button type="button" class="btn" onclick="pgExportDocx()">Esporta .docx</button>
+      <div class="row"><button type="button" class="btn" onclick="pgDuplicateProgram()">Duplica scheda</button><button type="button" class="btn" onclick="pgNewProgram()">Nuova scheda vuota</button></div>
+    </section>
+  </div>`;
 }
 function programma() {
   if (!S.prog) {
@@ -5184,7 +5207,7 @@ function programma() {
       ${notice}
       <div class="pg-chips">${tabs}</div>
     </div>
-    <div class="card">
+    <div class="card pg-content">
       ${sel.tab === 'strumenti' || sel.tab === 'stats' ? '' : `<div class="pg-scroll">${weekChips}</div>`}
       ${sel.tab === 'giorno' ? `<div class="pg-scroll">${dayChips}</div>` : ''}
       ${body}
