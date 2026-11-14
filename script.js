@@ -3,11 +3,15 @@ let S = {};
 try { S = JSON.parse(localStorage.getItem(KEY)) || {} } catch (e) { }
 S.max = S.max || { s: 210, b: 110, d: 265 }; S.done = S.done || {}; S.chk = S.chk || {}; S.wi = S.wi || 0; S.view = S.view || 'oggi'; S.time = S.time || '17:00'; S.pushOn = S.pushOn || false; S.weekLog = S.weekLog || {}; S.promptedDate = S.promptedDate || null; S.dayModal = S.dayModal || null; S.accLog = S.accLog || {}; S.liftHistory = S.liftHistory || {}; S.restByEx = S.restByEx || {}; S.restDefault = S.restDefault || 120; S.restPicker = S.restPicker || null; S.workoutLog = S.workoutLog || []; S.progCatalog = S.progCatalog || []; S.pianoSession = S.pianoSession || null;
 S.compModal = S.compModal || null; S.restSystemTimer = S.restSystemTimer !== false;
+// popup solo-UI: non si ripristinano all'avvio (si riaprono da soli se servono). compModal e pianoSession restano: contengono dati inseriti a mano
+S.dayModal = null; S.dayEdit = null; S.restPicker = null;
 S.exNotes = S.exNotes || {}; S.nextLoad = S.nextLoad || {};
 let _saveWarned = false;
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)) } catch (e) { if (!_saveWarned) { _saveWarned = true; try { alert('Attenzione: impossibile salvare i dati (memoria del browser piena?). Scarica subito un backup dalla scheda Piano.'); } catch (e2) { } } } };
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// Valore JS (JSON) sicuro dentro un attributo HTML (onclick="..." o onclick='...'): codifica & < > " ' come entità numeriche
+const jq = v => JSON.stringify(v).replace(/[&<>"']/g, c => '&#' + c.charCodeAt(0) + ';');
 const pad = n => String(n).padStart(2, '0');
 const dstr = (d = new Date()) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
 
@@ -75,7 +79,7 @@ function snapshotProg(prog) {
       days: Object.fromEntries(
         Object.keys(w.days || {}).map(d => [
           d,
-          (w.days[d] || []).map(e => ({ name: e.name, warm: !!e.warm, text: e.text || '' }))
+          (w.days[d] || []).map(e => ({ name: e.name, warm: !!e.warm, text: e.text || '', lift: e.lift || null }))
         ])
       )
     })),
@@ -211,8 +215,8 @@ function rebuildPianoFromStorico() {
     if (!entry || !entry.week) return;
     // Appartiene a questa scheda?
     const sameId = entry.progId && entry.progId === progId;
-    const sameFile = entry.progFileName && String(entry.progFileName).toLowerCase() === fnKey;
-    const sameName = entry.progName && S.prog.name &&
+    const sameFile = !entry.progId && entry.progFileName && String(entry.progFileName).toLowerCase() === fnKey;
+    const sameName = !entry.progId && entry.progName && S.prog.name &&
       String(entry.progName).toLowerCase() === String(S.prog.name).toLowerCase();
     // migrazione: log senza progId ma settimana presente nella scheda attuale
     const legacy = !entry.progId && !entry.progFileName && labels.has(String(entry.week));
@@ -272,7 +276,7 @@ function addTrainMarkToStorico(week, wd, dayNum) {
   removeStoricoByWeekWeekday(week, wd, progId);
   if (dayNum != null && dayNum !== 'comp') removeWorkoutLogByWeekDay(week, dayNum, progId);
   const wObj = S.prog && S.prog.weeks.find(x => x.label === week);
-  const title = (dayNum === 'comp') ? 'Complementari' : (wObj && dayNum != null ? focus(wObj, dayNum) : 'Allenamento');
+  const title = (dayNum === 'comp') ? 'Complementari' : (wObj && dayNum != null ? dayFocus(wObj, dayNum) : 'Allenamento');
   S.workoutLog = S.workoutLog || [];
   S.workoutLog.unshift({
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
@@ -392,7 +396,7 @@ function pianoSaveWithLoads() {
   S.pianoSession = { week, wd, day: dayNum };
   S.dayEdit = null;
   // contesto sessione per tg / set log
-  S.today = { date: dstr(), type: 'train', day: dayNum, week, fromPiano: true };
+  S.today = { date: dstr(), type: 'train', day: dayNum, week, fromPiano: true, startedAt: Date.now() };
   save();
   render();
 }
@@ -450,7 +454,7 @@ function pianoSessionHtml() {
         <div class="ex-head" onclick="tg(${i})" role="button">
           <div class="nm">${esc(e.name)}</div>
           <div class="dt">${fmt(e.text, e.lift)}</div>
-          ${techBadgesHtml(e)}
+          ${techBadgesHtml(e)}${exProgNoteHtml(e)}
         </div>
         ${setsBlock}
       </div>
@@ -459,7 +463,7 @@ function pianoSessionHtml() {
   return `<div class="modal-backdrop piano-session-backdrop" id="piano-session-modal">
     <div class="modal-card piano-session-card" onclick="event.stopPropagation()" style="--ac:${ac}">
       <p class="big" style="margin-bottom:4px">Log carichi</p>
-      <p class="mut" style="margin-bottom:12px">${esc(week.label)} · Giorno ${d} · ${esc(focus(week, d))}</p>
+      <p class="mut" style="margin-bottom:12px">${esc(week.label)} · Giorno ${d} · ${esc(dayFocus(week, d))}</p>
       <p class="mut" style="margin-bottom:12px;font-size:13px">Inserisci kg/rip dove puoi. Gli esercizi senza valori saranno comunque segnati come fatti (serie vuote).</p>
       <div class="piano-session-list train-wrap">${list}</div>
       <button type="button" class="pri" onclick="savePianoSession()">Salva nello storico</button>
@@ -1097,6 +1101,35 @@ function exportBackupJson() {
     document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
   } catch (e) { alert('Backup non riuscito: ' + (e && e.message ? e.message : e)); }
+}
+
+function reloadApp() { location.reload(); }
+/** Ripristina un backup .json scaricato con exportBackupJson(); sostituisce tutti i dati e ricarica l'app */
+function importBackupJson(input) {
+  const file = input && input.files && input.files[0];
+  if (!file) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    try {
+      const data = JSON.parse(fr.result);
+      if (!data || typeof data !== 'object' || Array.isArray(data) || !(data.prog || Array.isArray(data.workoutLog) || data.exLog)) {
+        throw new Error('Il file non sembra un backup di questa app.');
+      }
+      const n = Array.isArray(data.workoutLog) ? data.workoutLog.length : 0;
+      const info = (data.prog && data.prog.name ? data.prog.name + ' - ' : '') + n + ' allenamenti nello storico';
+      if (!confirm('Ripristinare questo backup?\n\n' + info + '\n\nTutti i dati attuali verranno SOSTITUITI.')) { input.value = ''; return; }
+      if (confirm('Vuoi scaricare prima un backup dei dati attuali?\n\nOK = scarica, Annulla = continua senza')) exportBackupJson();
+      data.dayModal = null; data.dayEdit = null; data.restPicker = null; data.compModal = null; data.pianoSession = null;
+      S = data;
+      localStorage.setItem(KEY, JSON.stringify(S));
+      reloadApp();
+    } catch (e) {
+      alert('Ripristino non riuscito: ' + (e && e.message ? e.message : e));
+    }
+    input.value = '';
+  };
+  fr.onerror = () => alert('Impossibile leggere il file.');
+  fr.readAsText(file, 'UTF-8');
 }
 
 /* ----- migrazione a schemaV 2 (idempotente) ----- */
@@ -2287,7 +2320,7 @@ function applyPlannedLoadToSets(weekLabel, day, exIndex, kg) {
 
 function exNoteAndNextLoadHtml(weekLabel, day, exIndex, exercise) {
   if (!exercise || exercise.warm) return '';
-  const wJs = JSON.stringify(weekLabel);
+  const wJs = jq(weekLabel);
   const note = getExNote(weekLabel, day, exIndex);
   const isAcc = isAccessory(exercise);
 
@@ -2391,7 +2424,7 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
   const sugKg = (T.backoffPct || T.mav) ? null : prescribedKg(exercise.text, lift);
   const est = sugKg != null ? sugKg : rpeTargetKg(T, info.reps != null ? info.reps : (info.targets && info.targets[0]), lift);
 
-  const wJs = JSON.stringify(weekLabel);
+  const wJs = jq(weekLabel);
   const restSec = getRestSec(exercise.name);
   const mono = !main && isMonolateral(exercise);
   if (mono) log.sets.forEach(st => ensureMonoSides(st));
@@ -2754,6 +2787,26 @@ function onRestFinished() {
   // se la barra non c'è (pagina non renderizzata), forza un render
   if (!el) { try { render(); } catch (e) { } }
 }
+/** Un tick del timer di recupero: aggiorna il display e, a zero, chiude il conteggio */
+function restTick() {
+  if (!_restTimer || _restTimer._done) return;
+  _restTimer.left = Math.max(0, Math.ceil((_restTimer.endsAt - Date.now()) / 1000));
+  const el = document.getElementById('rest-timer-display');
+  if (el && _restTimer.left > 0) {
+    const m = Math.floor(_restTimer.left / 60), s = _restTimer.left % 60;
+    el.textContent = m + ':' + String(s).padStart(2, '0');
+    el.classList.remove('done');
+  }
+  if (_restTimer.left <= 0) {
+    if (_restTimer._iv) { clearInterval(_restTimer._iv); _restTimer._iv = null; }
+    onRestFinished();
+  }
+}
+function startRestTicker() {
+  if (!_restTimer) return;
+  if (_restTimer._iv) clearInterval(_restTimer._iv);
+  _restTimer._iv = setInterval(restTick, 200);
+}
 function startRest(name, ev) {
   if (ev) { try { ev.stopPropagation(); ev.preventDefault(); } catch (e) { } }
   const sec = getRestSec(name) || 120;
@@ -2765,26 +2818,9 @@ function startRest(name, ev) {
   _restTimer = { endsAt: endsAt, name: String(name || ''), left: sec, _done: false };
   try { localStorage.setItem('powerapp_rest_ends', String(endsAt)); localStorage.setItem('powerapp_rest_name', String(name || '')); } catch (e) { }
 
-  const tick = () => {
-    if (!_restTimer || _restTimer._done) return;
-    _restTimer.left = Math.max(0, Math.ceil((_restTimer.endsAt - Date.now()) / 1000));
-    const el = document.getElementById('rest-timer-display');
-    if (el) {
-      if (_restTimer.left > 0) {
-        const m = Math.floor(_restTimer.left / 60);
-        const s = _restTimer.left % 60;
-        el.textContent = m + ':' + String(s).padStart(2, '0');
-        el.classList.remove('done');
-      }
-    }
-    if (_restTimer.left <= 0) {
-      if (_restTimer._iv) { clearInterval(_restTimer._iv); _restTimer._iv = null; }
-      onRestFinished();
-    }
-  };
-  _restTimer._iv = setInterval(tick, 200);
+  startRestTicker();
   render();
-  tick();
+  restTick();
 
   // iPhone: avvia subito il Timer di sistema (Comandi "Recupero PL")
   if (isIosDevice() && S.restSystemTimer !== false) {
@@ -2798,6 +2834,16 @@ function resumeRestTimerIfNeeded() {
     if (!ends) return;
     const left = Math.ceil((ends - Date.now()) / 1000);
     const name = localStorage.getItem('powerapp_rest_name') || '';
+    // scaduto da più di 2 minuti: il suono/notifica sarebbe fuori tempo, si ripulisce in silenzio
+    if (left < -120) {
+      try { localStorage.removeItem('powerapp_rest_ends'); localStorage.removeItem('powerapp_rest_name'); } catch (e) { }
+      if (_restTimer) {
+        if (_restTimer._iv) { clearInterval(_restTimer._iv); }
+        _restTimer = null;
+        try { render(); } catch (e) { }
+      }
+      return;
+    }
     if (left <= 0) {
       if (!_restTimer) _restTimer = { endsAt: ends, name: name, left: 0, _done: false };
       else { _restTimer.endsAt = ends; _restTimer.left = 0; }
@@ -2807,22 +2853,9 @@ function resumeRestTimerIfNeeded() {
     // riprendi conteggio se perso (JS sospeso)
     if (!_restTimer || !_restTimer._iv) {
       _restTimer = { endsAt: ends, name: name, left: left, _done: false };
-      const tick = () => {
-        if (!_restTimer || _restTimer._done) return;
-        _restTimer.left = Math.max(0, Math.ceil((_restTimer.endsAt - Date.now()) / 1000));
-        const el = document.getElementById('rest-timer-display');
-        if (el && _restTimer.left > 0) {
-          const m = Math.floor(_restTimer.left / 60), s = _restTimer.left % 60;
-          el.textContent = m + ':' + String(s).padStart(2, '0');
-        }
-        if (_restTimer.left <= 0) {
-          if (_restTimer._iv) { clearInterval(_restTimer._iv); _restTimer._iv = null; }
-          onRestFinished();
-        }
-      };
-      _restTimer._iv = setInterval(tick, 200);
+      startRestTicker();
       render();
-      tick();
+      restTick();
     }
   } catch (e) { }
 }
@@ -2893,7 +2926,7 @@ function dayModalHtml() {
     const doneArr = (S.done[w.label] || []).map(Number);
     body = `<p class="big">Quale allenamento?</p>
       <p class="mut">${esc(w.label)} · tocca un giorno</p>
-      ${allD.map(d => `<button type="button" style="border-left:8px solid ${AC[(d - 1) % 4]}" onclick="modalTrain(${d})">Giorno ${d} — ${focus(w, d)}${doneArr.includes(Number(d)) ? ' ✓' : ''}</button>`).join('') || '<p class="mut">Nessun giorno</p>'}
+      ${allD.map(d => `<button type="button" style="border-left:8px solid ${AC[(d - 1) % 4]}" onclick="modalTrain(${d})">Giorno ${d} — ${dayFocus(w, d)}${doneArr.includes(Number(d)) ? ' ✓' : ''}</button>`).join('') || '<p class="mut">Nessun giorno</p>'}
       <button type="button" style="border-left:8px solid #30a46c" onclick="modalTrain('comp')">Complementari</button>
       <button type="button" onclick="S.dayModal={step:'ask'};save();render()">← Indietro</button>`;
   } else {
@@ -2924,7 +2957,7 @@ function dayExercises(w, d) {
   if (!w || !w.days) return null;
   return w.days[d] || w.days[String(d)] || w.days[Number(d)] || null;
 }
-function focus(w, d) {
+function dayFocus(w, d) {
   const list = dayExercises(w, d);
   if (!list) return 'Accessori';
   const u = [];
@@ -2933,6 +2966,7 @@ function focus(w, d) {
 }
 function V(v) {
   S.view = v;
+  _pg.sheet = null;
   // chiudi popup giorno se si cambia tab (evita schermata bloccata)
   if (v !== 'oggi' && S.dayModal) S.dayModal = null;
   if (S.compModal) { S.compModal = null; _compCsv = null; }
@@ -2977,7 +3011,12 @@ async function parseDocx(file) {
       else rest.forEach((c, i) => { if (cols[i] && c.text) cols[i].days[day].push(mk(c.text)) });
     }
   }
-  weeks.sort((a, b) => a.n - b.n);
+  // Ordine per numero dopo il punto ("SETT 1.2" -> 2). Se lo stesso numero compare piu volte
+  // (es. due blocchi 1.1-1.4 e 2.1-2.4 in tabelle diverse) si ordina prima per il numero prima del punto.
+  const _ns = weeks.map(w => w.n);
+  const _collide = new Set(_ns).size !== _ns.length;
+  const _major = w => { const m = String(w.label).match(/(\d+)\.\d+/); return m ? +m[1] : 0; };
+  weeks.sort(_collide ? ((a, b) => _major(a) - _major(b) || a.n - b.n) : ((a, b) => a.n - b.n));
   if (!weeks.length) throw new Error('Nessuna tabella con settimane trovata');
   return { weeks, id: null, name: null };
 }
@@ -2985,6 +3024,7 @@ async function imp(inp) {
   try {
     const file = inp.files[0];
     if (!file) return;
+    if (S.progDraft && !confirm('Hai modifiche non applicate in Programma: caricando un file verranno scartate. Continuare?')) { inp.value = ''; return; }
     const prevProg = S.prog;
     // archivia scheda attuale (lo storico allenamenti NON si cancella)
     if (S.prog) archiveProg(S.prog);
@@ -3012,6 +3052,19 @@ async function imp(inp) {
     }
     ensureProgMeta(prog);
     resolvePendingExercises(prog);
+    pgEnsureSids(prog.weeks);
+    prog.base = pgClone(prog.weeks);
+    if (reuse && prevProg && prevProg.id === prog.id && prevProg.base && prevProg.weeks) {
+      // stessa scheda: riapplica le tue modifiche locali sopra la nuova versione del coach
+      const res = pgMergeReimport(prevProg, prog.weeks);
+      prog.versions = [{ ts: Date.now(), label: 'Prima del reimport del file', weeks: prevProg.weeks }].concat(prevProg.versions || []).slice(0, 5);
+      if (res.hadEdits) {
+        prog.weeks = res.weeks;
+        setTimeout(() => { try { alert('Modifiche locali riapplicate: ' + res.applied + (res.unmatched ? '. Non riapplicabili: ' + res.unmatched : '') + '.'); } catch (e) { } }, 0);
+      }
+    }
+    S.progDraft = null;
+    S.pgSel = null;
     const same = !!(prevProg && prevProg.id === prog.id);
     S.prog = prog;
     archiveProg(S.prog); // anche la nuova entra nel catalogo
@@ -3073,6 +3126,7 @@ function setToday(type, day) {
       type: 'train',
       day: dayNum,
       week: w.label,
+      startedAt: Date.now(),
     };
     save();
     render();
@@ -3160,7 +3214,7 @@ function tg(i) {
   save();
   render();
 }
-function logFinishedWorkout(weekLabel, day, weekdayOverride) {
+function logFinishedWorkout(weekLabel, day, weekdayOverride, dateOverride) {
   const w = S.prog && S.prog.weeks.find(x => x.label === weekLabel);
   if (!w || day == null || day === 'comp') return;
   const exs = dayExercises(w, day);
@@ -3168,7 +3222,9 @@ function logFinishedWorkout(weekLabel, day, weekdayOverride) {
   const k = weekLabel + '|' + day;
   const ck = S.chk[k] || [];
   if (S.prog) { ensureProgMeta(S.prog); archiveProg(S.prog); }
-  const wd = weekdayOverride != null ? Number(weekdayOverride) : weekdayMon0();
+  const _date = dateOverride || dstr();
+  const wd = weekdayOverride != null ? Number(weekdayOverride)
+    : (dateOverride ? weekdayMon0(new Date(dateOverride + 'T12:00:00')) : weekdayMon0());
   const _ak = accKey(weekLabel, day);
   const _keepAcc = S.accLog && S.accLog[_ak] ? JSON.parse(JSON.stringify(S.accLog[_ak])) : null;
   removeWorkoutLogByWeekDay(weekLabel, day, S.prog && S.prog.id);
@@ -3178,12 +3234,12 @@ function logFinishedWorkout(weekLabel, day, weekdayOverride) {
   const entry = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
     type: 'train',
-    date: dstr(),
+    date: _date,
     at: new Date().toISOString(),
     week: weekLabel,
     weekday: wd,
     day: day,
-    title: focus(w, day),
+    title: dayFocus(w, day),
     progId: S.prog ? S.prog.id : null,
     progName: S.prog ? S.prog.name : 'Scheda',
     progFileName: S.prog ? displayProgFileName(S.prog) : 'Scheda.docx',
@@ -3292,7 +3348,7 @@ function finish() {
   const exs = dayExercises(w, d);
   if (exs) {
     saveSessionLogs(weekLabel, d, exs);
-    logFinishedWorkout(weekLabel, d);
+    logFinishedWorkout(weekLabel, d, null, S.today.date);
   }
   rebuildPianoFromStorico();
   if (!remaining(w).length && S.wi < S.prog.weeks.length - 1) S.wi++;
@@ -3315,7 +3371,13 @@ function calLink(w, d) {
     });
     return x.name + ': ' + t;
   }).join('\n');
-  return 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' + encodeURIComponent(focus(w, d) + ' – ' + w.label + ' G' + d) + '&dates=' + f(s0) + '/' + f(e0) + '&details=' + encodeURIComponent(det);
+  return 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' + encodeURIComponent(dayFocus(w, d) + ' – ' + w.label + ' G' + d) + '&dates=' + f(s0) + '/' + f(e0) + '&details=' + encodeURIComponent(det);
+}
+/** Allenamento in corso: iniziato oggi, oppure meno di 12 ore fa (sessione a cavallo di mezzanotte) */
+function trainInProgress(t) {
+  if (!t || t.type !== 'train' || t.day == null || t.day === 'comp' || Number.isNaN(Number(t.day))) return false;
+  if (t.date === dstr()) return true;
+  return !!t.startedAt && (Date.now() - t.startedAt) < 12 * 3600 * 1000;
 }
 function oggi() {
   if (!S.prog) return importCard();
@@ -3330,7 +3392,7 @@ function oggi() {
   const week = W() || w;
 
   // Allenamento in corso: priorità massima
-  if (t && t.date === dstr() && t.type === 'train' && t.day != null && t.day !== 'comp' && !Number.isNaN(Number(t.day))) {
+  if (trainInProgress(t)) {
     return renderTrainSession(week, Number(t.day));
   }
 
@@ -3386,7 +3448,7 @@ function oggi() {
     const doneArr = (S.done[week.label] || []).map(Number);
     const btns = allDays.map(d => {
       const done = doneArr.includes(Number(d));
-      return `<button type="button" style="border-left:8px solid ${AC[(d - 1) % 4]}" onclick="setToday('train',${d})">Giorno ${d} — ${focus(week, d)}${done ? ' ✓' : ''}</button>`;
+      return `<button type="button" style="border-left:8px solid ${AC[(d - 1) % 4]}" onclick="setToday('train',${d})">Giorno ${d} — ${dayFocus(week, d)}${done ? ' ✓' : ''}</button>`;
     }).join('') || '<p class="mut">Nessun giorno in questa settimana</p>';
     return `<div class="card home-card">
       <p class="date-line">${todayLabel()}</p>
@@ -3444,7 +3506,7 @@ function renderTrainSession(week, day) {
     const acc = isAccessory(e);
     const rest = !e.warm ? getRestSec(e.name) : 0;
     const hist = !e.warm ? historyHtml(e.name, week.label, d) : '';
-    const nmJs = JSON.stringify(e.name);
+    const nmJs = jq(e.name);
     const timerBtn = !e.warm
       ? `<div class="rest-row">
           <button type="button" class="rest-start" data-ex="${esc(e.name)}" onclick='startRest(${nmJs}, event)'>Avvia ${fmtRest(rest)}</button>
@@ -3459,7 +3521,7 @@ function renderTrainSession(week, day) {
         <div class="ex-head" onclick="tg(${i})" role="button">
           <div class="nm">${esc(e.name)}</div>
           <div class="dt">${fmt(e.text, e.lift)}</div>
-          ${techBadgesHtml(e)}
+          ${techBadgesHtml(e)}${exProgNoteHtml(e)}
         </div>
         ${setsBlock}
         ${timerBtn}
@@ -3471,7 +3533,7 @@ function renderTrainSession(week, day) {
   <div class="train-wrap" style="--ac:${ac}">
     <div class="hero">
       <div class="mut">${esc(week.label)} · GIORNO ${d}</div>
-      <p class="big">${focus(week, d)}</p>
+      <p class="big">${dayFocus(week, d)}</p>
       <div class="mut">${ck.length}/${ex.length} esercizi fatti</div>
       <div class="bar"><i style="width:${pctDone}%"></i></div>
     </div>
@@ -3540,8 +3602,9 @@ function exportWorkoutCsv() {
     alert('Nessun allenamento nello storico da esportare.');
     return;
   }
-  const headers = ['workout_id', 'date', 'at', 'prog_id', 'prog_name', 'week', 'day', 'title', 'exercise', 'warm', 'main', 'exercise_done', 'set_n', 'kg', 'reps', 'set_done'];
+  const headers = ['workout_id', 'date', 'at', 'prog_id', 'prog_name', 'week', 'day', 'title', 'exercise', 'warm', 'main', 'exercise_done', 'set_n', 'kg', 'reps', 'set_done', 'kg_l', 'reps_l', 'kg_r', 'reps_r'];
   const lines = [headers.join(',')];
+  const cv = v => (v != null && v !== '' ? v : '');
   list.forEach(w => {
     const exs = w.exercises && w.exercises.length ? w.exercises : [{ name: '', warm: 0, main: 0, done: 0, sets: [] }];
     exs.forEach(e => {
@@ -3565,7 +3628,8 @@ function exportWorkoutCsv() {
           st.n != null ? st.n : (si + 1),
           st.kg != null && st.kg !== '' ? st.kg : '',
           st.reps != null && st.reps !== '' ? st.reps : '',
-          st.done ? 1 : 0
+          st.done ? 1 : 0,
+          cv(st.L && st.L.kg), cv(st.L && st.L.reps), cv(st.R && st.R.kg), cv(st.R && st.R.reps)
         ].join(','));
       });
     });
@@ -3640,6 +3704,7 @@ function workoutsFromCsvRows(rows) {
   const iProgId = header.indexOf('prog_id'), iProgName = header.indexOf('prog_name');
   const iWarm = col('warm'), iMain = col('main'), iExDone = col('exercise_done');
   const iSetN = col('set_n'), iKg = col('kg'), iReps = col('reps'), iSetDone = col('set_done');
+  const iKgL = header.indexOf('kg_l'), iRepsL = header.indexOf('reps_l'), iKgR = header.indexOf('kg_r'), iRepsR = header.indexOf('reps_r');
 
   const map = new Map(); // key = id or date|week|day
   for (let r = 1; r < rows.length; r++) {
@@ -3680,6 +3745,14 @@ function workoutsFromCsvRows(rows) {
     const repsRaw = iReps >= 0 ? row[iReps] : '';
     const kgN = kgRaw !== '' && kgRaw != null ? parseFloat(String(kgRaw).replace(',', '.')) : null;
     const repsN = repsRaw !== '' && repsRaw != null ? parseInt(repsRaw, 10) : null;
+    // serie monolaterale: colonne kg_l / reps_l / kg_r / reps_r
+    const numAt = (i, isInt) => { if (i < 0) return null; const v = row[i]; if (v === '' || v == null) return null; const x = isInt ? parseInt(v, 10) : parseFloat(String(v).replace(',', '.')); return isNaN(x) ? null : x; };
+    const kgL = numAt(iKgL), repsL = numAt(iRepsL, true), kgR = numAt(iKgR), repsR = numAt(iRepsR, true);
+    if (kgL != null || repsL != null || kgR != null || repsR != null) {
+      const dn = iSetDone >= 0 ? (row[iSetDone] === '1' || row[iSetDone] === 'true') : false;
+      ex.sets.push({ n: Number.isNaN(sn) ? ex.sets.length + 1 : sn, mono: true, kg: null, reps: null, done: dn, L: { kg: kgL, reps: repsL, done: dn }, R: { kg: kgR, reps: repsR, done: dn } });
+      continue;
+    }
     ex.sets.push({
       n: Number.isNaN(sn) ? ex.sets.length + 1 : sn,
       kg: kgN != null && !isNaN(kgN) ? kgN : null,
@@ -3903,7 +3976,7 @@ function piano() {
     if (S.dayEdit.step === 'pickTrain' && wObj) {
       const ds = days(wObj);
       return `<div class="card edit-day" id="edit-day-panel"><p class="big">Quale allenamento?</p><p class="mut">${esc(S.dayEdit.week)} · ${name}</p>
-        ${ds.map(d => `<button style="border-left:8px solid ${AC[(d - 1) % 4]}" onclick="setWdayTrain(${d})">Giorno ${d} — ${focus(wObj, d)}</button>`).join('') || '<p class="mut">Nessun giorno in questa settimana</p>'}
+        ${ds.map(d => `<button style="border-left:8px solid ${AC[(d - 1) % 4]}" onclick="setWdayTrain(${d})">Giorno ${d} — ${dayFocus(wObj, d)}</button>`).join('') || '<p class="mut">Nessun giorno in questa settimana</p>'}
         <button style="border-left:8px solid #30a46c" onclick="setWdayTrain('comp')">Complementari <span class="mut" style="font-weight:600">(extra, fuori scheda)</span></button>
         <button onclick="S.dayEdit={...S.dayEdit,step:'type'};save();render()">← Indietro</button>
         <button onclick="cancelDayEdit()">Annulla</button>
@@ -3911,7 +3984,7 @@ function piano() {
     }
     if (S.dayEdit.step === 'saveChoice') {
       const dn = S.dayEdit.dayNum;
-      const label = dn === 'comp' ? 'Complementari' : ('Giorno ' + dn + (wObj && dn != null && dn !== 'comp' ? ' — ' + focus(wObj, dn) : ''));
+      const label = dn === 'comp' ? 'Complementari' : ('Giorno ' + dn + (wObj && dn != null && dn !== 'comp' ? ' — ' + dayFocus(wObj, dn) : ''));
       return `<div class="card edit-day" id="edit-day-panel">
         <p class="big">Come vuoi salvarlo?</p>
         <p class="mut">${esc(S.dayEdit.week)} · ${name} · ${esc(label)}</p>
@@ -3957,7 +4030,7 @@ function piano() {
   </div>
   <h1>Settimane</h1>${S.prog.weeks.map((w, i) => `${makeEditCard(w.label)}<div class="wk ${i === S.wi ? 'cur' : ''} ${S.dayEdit && S.dayEdit.week === w.label ? 'wk-editing' : ''}" onclick="S.wi=${i};save();render()"><div class="wk-top"><b>${esc(w.label)}</b><button class="res-btn" onclick="resetWk('${w.label}', event)">❌</button></div>${weekDots(w)}</div>`).join('')}
   <p class="mut">Tocca un giorno (Lun–Dom) per impostare allenamento o riposo. Rosso = allenamento · blu = riposo · grigio = non registrato.</p>
-  <h1>Nuova scheda</h1><div class="card"><label class="btn" style="margin:0;cursor:pointer">🔄 Cambia file della scheda<input type="file" accept=".docx" style="display:none" onchange="imp(this)"></label><button type="button" class="btn" style="margin:10px 0 0" onclick="exportBackupJson()">Scarica backup dati (.json)</button><p id="err" class="mut"></p></div>`;
+  <h1>Nuova scheda</h1><div class="card"><label class="btn" style="margin:0;cursor:pointer">🔄 Cambia file della scheda<input type="file" accept=".docx" style="display:none" onchange="imp(this)"></label><button type="button" class="btn" style="margin:10px 0 0" onclick="exportBackupJson()">Scarica backup dati (.json)</button><label class="btn" style="margin:10px 0 0 8px;cursor:pointer">Ripristina backup (.json)<input type="file" accept=".json,application/json" style="display:none" onchange="importBackupJson(this)"></label><p id="err" class="mut"></p></div>`;
 }
 function resetWk(label, e) {
   e.stopPropagation();
@@ -4097,6 +4170,1027 @@ function bindRestButtons() {
   });
 }
 
+/* =====================================================================
+ * PROGRAMMA: modifica della scheda (nome, serie/rip, ordine, per settimana o per tutte),
+ * bozza + applica, versioni, base del coach vs modifiche locali, strumenti, statistiche, export .docx
+ * Modello: ogni esercizio ha un id di riga stabile `sid` (uguale nelle settimane); S.prog.weeks e' la
+ * scheda attuale, S.prog.base l'originale del coach, S.progDraft la bozza non ancora applicata.
+ * ===================================================================== */
+const PG_VARIANTS = {
+  s: ['Squat', 'Squat con pause', 'Front squat', 'Box squat', 'Squat tecnico'],
+  b: ['Panca piana', 'Panca presa stretta', 'Panca con pause', 'Panca con fermo', 'Panca inclinata'],
+  d: ['Stacco', 'Stacco sumo', 'Stacco rumeno', 'Stacco da deficit', 'Stacco con pause']
+};
+const PG_SCHEMES = [
+  { id: '5x5', label: '5x5 a percentuale', blocks: [{ type: 'pct', sets: 5, reps: 5, pct: 75, note: '' }] },
+  { id: '4x4', label: '4x4 a percentuale', blocks: [{ type: 'pct', sets: 4, reps: 4, pct: 77.5, note: '' }] },
+  { id: '3x5', label: '3x5 a percentuale', blocks: [{ type: 'pct', sets: 3, reps: 5, pct: 75, note: '' }] },
+  { id: '5x3', label: '5x3 a percentuale', blocks: [{ type: 'pct', sets: 5, reps: 3, pct: 80, note: '' }] },
+  { id: '3x3', label: '3x3 a percentuale', blocks: [{ type: 'pct', sets: 3, reps: 3, pct: 85, note: '' }] },
+  { id: '5x2', label: '5x2 a percentuale', blocks: [{ type: 'pct', sets: 5, reps: 2, pct: 87.5, note: '' }] },
+  { id: 'top', label: 'Top set RPE 8 + back-off', blocks: [{ type: 'rpe', sets: 1, reps: 3, rpe: '8', note: '' }, { type: 'pct', sets: 3, reps: 5, pct: 75, note: '' }] },
+  { id: 'rpe', label: '3x5 a RPE 7', blocks: [{ type: 'rpe', sets: 3, reps: 5, rpe: '7', note: '' }] },
+  { id: 'ist', label: 'Istintiva', blocks: [{ type: 'ist', note: '' }] }
+];
+const PG_FIELDS = ['name', 'text', 'warm', 'lift', 'note', 'coachNote'];
+const PG_CMP = PG_FIELDS.concat(['subOf']);
+let _pg = { sheet: null, tool: {}, notice: '', max: null };
+
+const pgClone = o => JSON.parse(JSON.stringify(o));
+const pgNum = v => String(v == null ? '' : v).replace(',', '.').trim();
+const pgNorm = (e, k) => (k === 'warm' ? !!e[k] : (e[k] == null ? '' : String(e[k])));
+function pgLiftFor(name) {
+  name = String(name || '');
+  if (/riscaldamento|\bpre\b/i.test(name)) return null;
+  return /squat/i.test(name) ? 's' : /stacco|regular|sumo/i.test(name) ? 'd' : /^panca(?!.*inclinata)/i.test(name) ? 'b' : null;
+}
+function pgWeeks() { return (S.progDraft && S.progDraft.weeks) || (S.prog && S.prog.weeks) || []; }
+function pgDays(weeks) {
+  const s = new Set();
+  weeks.forEach(w => Object.keys(w.days || {}).forEach(d => s.add(Number(d))));
+  return [...s].sort((a, b) => a - b);
+}
+function pgFind(weeks, label, day, sid) {
+  const w = weeks.find(x => x.label === label);
+  const list = w && dayExercises(w, day);
+  if (!list) return null;
+  const idx = list.findIndex(e => e.sid === sid);
+  return idx < 0 ? null : { w, list, idx, e: list[idx] };
+}
+/** id di riga stabile: giorno|exId#occorrenza (uguale in tutte le settimane per lo stesso esercizio) */
+function pgEnsureSids(weeks) {
+  (weeks || []).forEach(w => Object.keys(w.days || {}).forEach(d => {
+    const list = w.days[d] || [];
+    const used = new Set(list.filter(e => e.sid).map(e => e.sid));
+    const occ = {};
+    list.forEach((e, i) => {
+      const id = (e.name && getExId(e.name)) || ('x' + i);
+      occ[id] = (occ[id] || 0) + 1;
+      if (!e.sid) {
+        let sid = d + '|' + id + '#' + (occ[id] - 1);
+        while (used.has(sid)) sid += '+';
+        used.add(sid); e.sid = sid;
+      }
+    });
+  }));
+}
+function pgInit() {
+  if (!S.prog || !S.prog.weeks) return;
+  pgEnsureSids(S.prog.weeks);
+  if (!S.prog.base) S.prog.base = pgClone(S.prog.weeks);
+  if (S.progDraft) pgEnsureSids(S.progDraft.weeks);
+}
+function pgEnsureDraft() {
+  if (!S.progDraft) S.progDraft = { weeks: pgClone(S.prog.weeks), changes: 0 };
+  return S.progDraft;
+}
+function pgTouch() { if (S.progDraft) S.progDraft.changes = (S.progDraft.changes || 0) + 1; save(); }
+function pgSel() {
+  const ws = pgWeeks();
+  const s = S.pgSel = S.pgSel || {};
+  if (!ws.some(w => w.label === s.week)) s.week = (ws[Math.min(S.wi || 0, ws.length - 1)] || ws[0] || {}).label;
+  const days = pgDays(ws);
+  if (!days.includes(Number(s.day))) s.day = days.length ? days[0] : 1;
+  s.day = Number(s.day);
+  if (!['giorno', 'matrice', 'stats', 'strumenti'].includes(s.tab)) s.tab = 'giorno';
+  if (s.mainOnly == null) s.mainOnly = true;
+  if (s.allWeeks == null) s.allWeeks = true;
+  return s;
+}
+function pgSetSel(k, v) { pgSel()[k] = v; save(); render(); }
+function pgNotify(msg) { _pg.notice = msg || ''; }
+function pgIsModified(e, label, day) {
+  const base = S.prog && S.prog.base;
+  if (!base) return false;
+  const bw = base.find(w => w.label === label);
+  if (!bw) return true;
+  const b = (dayExercises(bw, day) || []).find(x => x.sid === e.sid);
+  if (!b) return true;
+  return PG_CMP.some(k => pgNorm(e, k) !== pgNorm(b, k));
+}
+/** per una riga: in quante settimane c'e' e dove nome/testo sono diversi dalla settimana indicata */
+function pgUniform(ws, day, sid, e) {
+  let n = 0; const diff = [];
+  ws.forEach(w => {
+    const h = pgFind([w], w.label, day, sid);
+    if (!h) return;
+    n++;
+    if (h.e.name !== e.name || (h.e.text || '') !== (e.text || '')) diff.push(w.label);
+  });
+  return { n, total: ws.length, diff };
+}
+function pgLocked(labels) { return labels.filter(l => ((S.done && S.done[l]) || []).length); }
+
+/* ----- blocchi della prescrizione <-> testo ----- */
+function pgParseBlocks(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return [];
+  const parts = splitPrescriptionBlocks(raw);
+  const NUM = '(\\d+(?:[.,]\\d+)?)';
+  return (parts.length ? parts : [raw]).map(p => {
+    p = String(p).trim();
+    let m;
+    const bad = r => /mav|\bdel\b|amrap|emom|cluster|%|@/i.test(r);
+    if ((m = p.match(new RegExp('^(\\d+)\\s*x\\s*(\\d+)(s)?\\s+' + NUM + '\\s*%\\s*(.*)$', 'i'))) && !bad(m[5])) {
+      return { type: 'pct', sets: +(m[3] ? m[2] : m[1]), reps: +(m[3] ? m[1] : m[2]), pct: parseFloat(pgNum(m[4])), note: m[5].trim() };
+    }
+    if ((m = p.match(new RegExp('^(\\d+)\\s*x\\s*(\\d+)\\s*@\\s*(' + NUM + '(?:\\s*-\\s*' + NUM + ')?)\\s*(.*)$', 'i')))) {
+      const note = m[m.length - 1];
+      if (!bad(note)) return { type: 'rpe', sets: +m[1], reps: +m[2], rpe: pgNum(m[3]).replace(/\s+/g, ''), note: note.trim() };
+    }
+    if ((m = p.match(new RegExp('^(\\d+)\\s*@\\s*(' + NUM + '(?:\\s*-\\s*' + NUM + ')?)\\s*(.*)$', 'i')))) {
+      const note = m[m.length - 1];
+      if (!bad(note)) return { type: 'rpe', sets: 1, reps: +m[1], rpe: pgNum(m[2]).replace(/\s+/g, ''), note: note.trim() };
+    }
+    if ((m = p.match(/^istintiva\b\s*(.*)$/i))) return { type: 'ist', note: m[1].trim() };
+    if ((m = p.match(/^(\d+)\s*x\s*(\d+)(s)?\s*(.*)$/i)) && !bad(m[4])) {
+      return { type: 'sr', sets: +(m[3] ? m[2] : m[1]), reps: +(m[3] ? m[1] : m[2]), note: m[4].trim() };
+    }
+    return { type: 'free', raw: p };
+  });
+}
+function pgBlocksToText(blocks) {
+  return (blocks || []).map(b => {
+    const note = b.note ? ' ' + String(b.note).trim() : '';
+    const sets = +b.sets || 1, reps = +b.reps || 1;
+    if (b.type === 'pct') return `${sets}x${reps} ${pgNum(b.pct)}%${note}`;
+    if (b.type === 'rpe') return (sets > 1 ? `${sets}x${reps} @${pgNum(b.rpe)}` : `${reps}@${pgNum(b.rpe)}`) + note;
+    if (b.type === 'sr') return `${sets}x${reps}${note}`;
+    if (b.type === 'ist') return 'istintiva' + note;
+    return String(b.raw || '').trim();
+  }).filter(Boolean).join(' + ');
+}
+
+/* ----- statistiche e controlli ----- */
+function pgExStats(e, maxes) {
+  const text = String(e.text || '');
+  const parts = splitPrescriptionBlocks(text);
+  let sets = 0, reps = 0, ton = 0, intW = 0, intR = 0;
+  (parts.length ? parts : [text]).forEach(p => {
+    const info = parseSets(p);
+    const c = info.count || 0;
+    let r = null;
+    if (info.targets) r = info.targets.reduce((a, b) => a + b, 0);
+    else if (info.reps != null) r = info.reps * c;
+    sets += c;
+    if (r != null) reps += r;
+    const m = p.match(/(\d+(?:[.,]\d+)?)\s*%/);
+    if (m && !/\bm\.?a\.?v\.?\b|\bdel\b/i.test(p) && r != null) {
+      const pct = parseFloat(pgNum(m[1]));
+      intW += pct * r; intR += r;
+      const mx = e.lift && maxes ? maxes[e.lift] : null;
+      if (mx) ton += Math.round(pct / 100 * mx / 2.5) * 2.5 * r;
+    }
+  });
+  return { sets, reps, ton, intW, intR };
+}
+function pgWeekStats(w, maxes) {
+  const out = { sets: 0, ton: 0, intW: 0, intR: 0, days: {} };
+  Object.keys(w.days || {}).forEach(d => {
+    let secs = 0, sets = 0;
+    (w.days[d] || []).forEach(e => {
+      if (e.warm) return;
+      const s = pgExStats(e, maxes);
+      out.sets += s.sets; out.ton += s.ton; out.intW += s.intW; out.intR += s.intR;
+      sets += s.sets;
+      secs += s.sets * ((getRestSec(e.name) || 120) + 45);
+    });
+    out.days[d] = { sets, min: Math.round(secs / 60) };
+  });
+  out.avg = out.intR ? out.intW / out.intR : null;
+  return out;
+}
+function pgLint(ws) {
+  const out = [];
+  const counts = {};
+  ws.forEach(w => Object.keys(w.days || {}).forEach(d => {
+    const list = w.days[d] || [];
+    const seen = {};
+    list.forEach(e => {
+      if (e.warm) return;
+      const id = getExId(e.name);
+      if (id) {
+        if (seen[id]) out.push({ week: w.label, day: d, msg: 'Esercizio duplicato: ' + e.name });
+        seen[id] = 1;
+      }
+      const t = String(e.text || '').trim();
+      if (!t) out.push({ week: w.label, day: d, msg: 'Prescrizione vuota: ' + e.name });
+      else if (!/\d/.test(t) && !/istintiva|mav|amrap|emom|singola|doppia|tripla|cluster|ramp/i.test(t)) {
+        out.push({ week: w.label, day: d, msg: 'Notazione non riconosciuta (useranno 3 serie): ' + e.name });
+      }
+    });
+    (counts[d] = counts[d] || []).push({ label: w.label, n: list.filter(e => !e.warm).length });
+  }));
+  Object.keys(counts).forEach(d => {
+    const arr = counts[d], ref = arr[0];
+    const diff = arr.find(x => x.n !== ref.n);
+    if (diff) out.push({ week: diff.label, day: d, msg: `Numero di esercizi diverso: ${ref.label} ha ${ref.n}, ${diff.label} ha ${diff.n}` });
+  });
+  return out;
+}
+
+/* ----- bozza / applica / versioni ----- */
+function pgApply() {
+  const d = S.progDraft;
+  if (!d || !S.prog) return;
+  pgInit();
+  const before = S.prog.weeks;
+  S.prog.versions = [{ ts: Date.now(), label: (d.changes || 0) + ' modifiche', weeks: before }].concat(S.prog.versions || []).slice(0, 5);
+  d.weeks.forEach(nw => {
+    const ow = before.find(x => x.label === nw.label);
+    Object.keys(nw.days || {}).forEach(day => {
+      const a = (dayExercises(nw, day) || []).map(e => e.sid).join(',');
+      const b = ow ? (dayExercises(ow, day) || []).map(e => e.sid).join(',') : null;
+      if (a !== b && S.chk) delete S.chk[nw.label + '|' + day];
+    });
+  });
+  S.prog.weeks = d.weeks;
+  S.progDraft = null;
+  S.pianoSession = null;
+  if ((S.wi || 0) >= S.prog.weeks.length) S.wi = Math.max(0, S.prog.weeks.length - 1);
+  try { archiveProg(S.prog); } catch (e) { }
+  pgNotify('Modifiche applicate alla scheda.');
+  save(); render();
+}
+function pgDiscard() {
+  if (!S.progDraft) return;
+  if (!confirm('Scartare le modifiche non applicate?')) return;
+  S.progDraft = null; _pg.sheet = null; pgNotify(''); save(); render();
+}
+function pgRestoreVersion(i) {
+  const vs = S.prog && S.prog.versions;
+  if (!vs || !vs[i]) return;
+  if (!confirm('Ripristinare la versione "' + vs[i].label + '" del ' + new Date(vs[i].ts).toLocaleString('it-IT') + '?\n\nLa scheda attuale viene salvata tra le versioni.')) return;
+  const v = vs.splice(i, 1)[0];
+  vs.unshift({ ts: Date.now(), label: 'Prima del ripristino', weeks: S.prog.weeks });
+  S.prog.versions = vs.slice(0, 5);
+  S.prog.weeks = v.weeks;
+  S.progDraft = null;
+  Object.keys(S.chk || {}).forEach(k => delete S.chk[k]);
+  if ((S.wi || 0) >= S.prog.weeks.length) S.wi = Math.max(0, S.prog.weeks.length - 1);
+  try { archiveProg(S.prog); } catch (e) { }
+  save(); render();
+}
+function pgRestoreBaseAll() {
+  if (!S.prog || !S.prog.base) return;
+  if (!confirm('Riportare TUTTA la scheda a come l\'ha scritta il coach? (diventa una bozza, poi la applichi)')) return;
+  pgEnsureDraft();
+  S.progDraft.weeks = pgClone(S.prog.base);
+  pgTouch(); render();
+}
+function pgRenameProg() {
+  const n = prompt('Nome della scheda', S.prog.name || '');
+  if (n == null || !n.trim()) return;
+  S.prog.name = n.trim(); save(); render();
+}
+
+/* ----- foglio di modifica esercizio ----- */
+function pgDefaultScope(e) { return (e.lift && !e.warm) ? 'this' : 'all'; }
+function pgOpen(sid, label, day) {
+  pgInit();
+  const sel = pgSel();
+  label = label || sel.week; day = day != null ? Number(day) : sel.day;
+  const hit = pgFind(pgWeeks(), label, day, sid);
+  if (!hit) return;
+  const e = hit.e;
+  const f = { name: e.name || '', text: e.text || '', warm: !!e.warm, lift: e.lift || '', note: e.note || '', coachNote: e.coachNote || '' };
+  _pg.sheet = { mode: 'edit', sid, week: label, day, orig: pgClone(f), f, subOf: e.subOf || '', blocks: pgParseBlocks(f.text), textMode: false, scope: pgDefaultScope(e), pick: [], moveTo: '', subName: '' };
+  render();
+}
+function pgOpenNew() {
+  pgInit();
+  const sel = pgSel();
+  const f = { name: '', text: '3x10', warm: false, lift: '', note: '', coachNote: '' };
+  _pg.sheet = { mode: 'new', sid: 'u_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), week: sel.week, day: sel.day, orig: pgClone(f), f, subOf: '', blocks: pgParseBlocks(f.text), textMode: false, scope: 'all', pick: [], moveTo: '', subName: '' };
+  render();
+}
+function pgClose() { _pg.sheet = null; render(); }
+function pgRefreshPreview() {
+  const el = $('pg-preview');
+  if (el) el.innerHTML = pgPreviewHtml();
+  const ta = $('pg-raw');
+  if (ta && ta !== document.activeElement) ta.value = _pg.sheet.f.text;
+}
+function pgSet(k, v) {
+  const sh = _pg.sheet; if (!sh) return;
+  if (k === 'warm') sh.f.warm = !!v;
+  else sh.f[k] = v;
+  if (k === 'name') {
+    // se la riga era "fondamentale" per nome, aggiorna anche l'alzata in base al nuovo nome
+    if (pgLiftFor(sh.orig.name) === (sh.orig.lift || null) && !sh.liftTouched) sh.f.lift = pgLiftFor(v) || '';
+  }
+  if (k === 'lift') sh.liftTouched = true;
+  if (k === 'lift' || k === 'warm') { render(); return; }
+  if (k === 'text') { sh.blocks = pgParseBlocks(v); }
+  pgRefreshPreview();
+}
+function pgBlockSet(i, k, v) {
+  const sh = _pg.sheet; if (!sh || !sh.blocks[i]) return;
+  sh.blocks[i][k] = (k === 'sets' || k === 'reps') ? (parseInt(v, 10) || '') : (k === 'pct' ? pgNum(v) : v);
+  sh.f.text = pgBlocksToText(sh.blocks);
+  pgRefreshPreview();
+}
+function pgBlockType(i, type) {
+  const sh = _pg.sheet; if (!sh || !sh.blocks[i]) return;
+  const old = sh.blocks[i];
+  sh.blocks[i] = Object.assign({ type, sets: old.sets || 3, reps: old.reps || 5, note: old.note || '' },
+    type === 'pct' ? { pct: old.pct || 75 } : type === 'rpe' ? { rpe: old.rpe || '8' } : type === 'free' ? { raw: pgBlocksToText([old]) } : {});
+  sh.f.text = pgBlocksToText(sh.blocks);
+  render();
+}
+function pgBlockAdd() {
+  const sh = _pg.sheet; if (!sh) return;
+  sh.blocks.push({ type: 'sr', sets: 3, reps: 8, note: '' });
+  sh.f.text = pgBlocksToText(sh.blocks);
+  render();
+}
+function pgBlockDel(i) {
+  const sh = _pg.sheet; if (!sh) return;
+  sh.blocks.splice(i, 1);
+  sh.f.text = pgBlocksToText(sh.blocks);
+  render();
+}
+function pgTextMode(on) { if (_pg.sheet) { _pg.sheet.textMode = !!on; if (!on) _pg.sheet.blocks = pgParseBlocks(_pg.sheet.f.text); render(); } }
+function pgScheme(id) {
+  const sh = _pg.sheet; const s = PG_SCHEMES.find(x => x.id === id);
+  if (!sh || !s) return;
+  sh.blocks = pgClone(s.blocks);
+  sh.f.text = pgBlocksToText(sh.blocks);
+  render();
+}
+function pgVariant(name) { if (_pg.sheet && name) { pgSet('name', name); render(); } }
+function pgScope(s) { if (_pg.sheet) { _pg.sheet.scope = s; render(); } }
+function pgPick(label, on) {
+  const sh = _pg.sheet; if (!sh) return;
+  sh.pick = (sh.pick || []).filter(x => x !== label);
+  if (on) sh.pick.push(label);
+  render();
+}
+/** settimane interessate dal salvataggio in base all'ambito scelto */
+function pgScopeLabels(sh) {
+  const ws = pgWeeks();
+  const idx = ws.findIndex(w => w.label === sh.week);
+  const hit = w => pgFind([w], w.label, sh.day, sh.sid);
+  let out;
+  if (sh.mode === 'new') out = sh.scope === 'all' ? ws.filter(w => dayExercises(w, sh.day)) : ws.filter(w => w.label === sh.week);
+  else if (sh.scope === 'all') out = ws.filter(w => hit(w));
+  else if (sh.scope === 'from') out = ws.filter((w, i) => i >= idx && hit(w));
+  else if (sh.scope === 'same') {
+    out = ws.filter(w => { const h = hit(w); return h && PG_FIELDS.every(k => pgNorm(h.e, k) === pgNorm(sh.orig, k)); });
+    if (!out.some(w => w.label === sh.week)) out.push(ws[idx]);
+  } else if (sh.scope === 'pick') out = ws.filter(w => hit(w) && ((sh.pick || []).includes(w.label) || w.label === sh.week));
+  else out = ws.filter(w => w.label === sh.week);
+  return out.filter(Boolean).map(w => w.label);
+}
+function pgConfirmLocked(labels) {
+  const l = pgLocked(labels);
+  if (!l.length) return true;
+  return confirm('Alcune settimane sono già state fatte (' + l.join(', ') + ').\n\nLe modifiche cambiano la scheda ma NON lo storico degli allenamenti. Continuare?');
+}
+function pgRenameShare(oldName, newName) {
+  const oldId = getExId(oldName);
+  const known = exLookupId(newName);
+  const hist = S.exLog && S.exLog[oldId] && S.exLog[oldId].entries && S.exLog[oldId].entries.length;
+  if (hist && !known) {
+    if (confirm('Hai rinominato "' + oldName + '" in "' + newName + '".\n\nÈ lo stesso esercizio (condivide lo storico)?\n\nOK = stesso esercizio, Annulla = esercizio diverso')) {
+      const n = exNorm(newName);
+      if (n.key) S.exAlias[n.key] = oldId;
+    }
+  }
+}
+function pgSaveSheet() {
+  const sh = _pg.sheet; if (!sh) return;
+  const f = sh.f;
+  const name = String(f.name || '').trim();
+  if (!name) { alert('Inserisci il nome dell\'esercizio.'); return; }
+  const labels = pgScopeLabels(sh);
+  if (!pgConfirmLocked(labels)) return;
+  pgEnsureDraft();
+  const ws = S.progDraft.weeks;
+  const clean = { name, text: String(f.text || '').trim(), warm: !!f.warm, lift: f.lift || null, note: String(f.note || '').trim(), coachNote: String(f.coachNote || '').trim() };
+  if (sh.mode === 'new') {
+    labels.forEach(l => {
+      const w = ws.find(x => x.label === l);
+      const list = dayExercises(w, sh.day) || (w.days[sh.day] = []);
+      const e = { sid: sh.sid, name: clean.name, text: clean.text, warm: clean.warm, lift: clean.lift };
+      if (clean.note) e.note = clean.note;
+      if (clean.coachNote) e.coachNote = clean.coachNote;
+      list.push(e);
+    });
+  } else {
+    const changed = PG_FIELDS.filter(k => pgNorm(clean, k) !== pgNorm(sh.orig, k));
+    if (changed.includes('name')) pgRenameShare(sh.orig.name, clean.name);
+    labels.forEach(l => {
+      const h = pgFind(ws, l, sh.day, sh.sid);
+      if (!h) return;
+      changed.forEach(k => {
+        if (k === 'note' || k === 'coachNote') { if (clean[k]) h.e[k] = clean[k]; else delete h.e[k]; }
+        else h.e[k] = clean[k];
+      });
+    });
+  }
+  _pg.sheet = null;
+  pgTouch(); render();
+}
+function pgDeleteSheet() {
+  const sh = _pg.sheet; if (!sh || sh.mode !== 'edit') return;
+  const labels = pgScopeLabels(sh);
+  if (!pgConfirmLocked(labels)) return;
+  if (!confirm('Eliminare "' + sh.orig.name + '" da ' + labels.length + ' settimana/e?')) return;
+  pgEnsureDraft();
+  labels.forEach(l => { const h = pgFind(S.progDraft.weeks, l, sh.day, sh.sid); if (h) h.list.splice(h.idx, 1); });
+  _pg.sheet = null; pgTouch(); render();
+}
+function pgDuplicateSheet() {
+  const sh = _pg.sheet; if (!sh || sh.mode !== 'edit') return;
+  const labels = pgScopeLabels(sh);
+  if (!pgConfirmLocked(labels)) return;
+  pgEnsureDraft();
+  const nsid = 'u_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  labels.forEach(l => { const h = pgFind(S.progDraft.weeks, l, sh.day, sh.sid); if (h) { const c = pgClone(h.e); c.sid = nsid; h.list.splice(h.idx + 1, 0, c); } });
+  _pg.sheet = null; pgTouch(); render();
+}
+function pgMoveToDay() {
+  const sh = _pg.sheet; if (!sh || sh.mode !== 'edit') return;
+  const to = Number(sh.moveTo);
+  if (!to || to === sh.day) return;
+  const labels = pgScopeLabels(sh);
+  if (!pgConfirmLocked(labels)) return;
+  pgEnsureDraft();
+  const used = new Set();
+  S.progDraft.weeks.forEach(w => (dayExercises(w, to) || []).forEach(e => used.add(e.sid)));
+  let nsid = sh.sid; while (used.has(nsid)) nsid += '+';
+  labels.forEach(l => {
+    const h = pgFind(S.progDraft.weeks, l, sh.day, sh.sid);
+    if (!h) return;
+    const e = h.list.splice(h.idx, 1)[0];
+    e.sid = nsid;
+    (dayExercises(h.w, to) || (h.w.days[to] = [])).push(e);
+  });
+  _pg.sheet = null; pgTouch(); render();
+}
+function pgSubstitute() {
+  const sh = _pg.sheet; if (!sh || sh.mode !== 'edit') return;
+  const nn = String(sh.subName || '').trim();
+  if (!nn) { alert('Scrivi il nome dell\'esercizio sostitutivo.'); return; }
+  const labels = pgScopeLabels(sh);
+  if (!pgConfirmLocked(labels)) return;
+  pgEnsureDraft();
+  const orig = sh.subOf || sh.orig.name;
+  if (!exLookupId(nn) && confirm('"' + nn + '" condivide lo storico con "' + orig + '"?\n\nOK = stesso esercizio, Annulla = esercizio diverso')) {
+    const n = exNorm(nn); if (n.key) S.exAlias[n.key] = getExId(orig);
+  }
+  labels.forEach(l => { const h = pgFind(S.progDraft.weeks, l, sh.day, sh.sid); if (h) { h.e.subOf = orig; h.e.name = nn; } });
+  _pg.sheet = null; pgTouch(); render();
+}
+function pgUnsub() {
+  const sh = _pg.sheet; if (!sh || !sh.subOf) return;
+  const labels = pgScopeLabels(sh);
+  pgEnsureDraft();
+  labels.forEach(l => { const h = pgFind(S.progDraft.weeks, l, sh.day, sh.sid); if (h && h.e.subOf) { h.e.name = h.e.subOf; delete h.e.subOf; } });
+  _pg.sheet = null; pgTouch(); render();
+}
+function pgRevertCell() {
+  const sh = _pg.sheet; if (!sh || sh.mode !== 'edit' || !S.prog.base) return;
+  const b = pgFind(S.prog.base, sh.week, sh.day, sh.sid);
+  if (!b) { alert('Questa riga non esiste nella scheda del coach.'); return; }
+  pgEnsureDraft();
+  const h = pgFind(S.progDraft.weeks, sh.week, sh.day, sh.sid);
+  if (h) { PG_CMP.forEach(k => { if (b.e[k] == null || b.e[k] === '') delete h.e[k]; else h.e[k] = b.e[k]; }); if (h.e.lift === undefined) h.e.lift = null; }
+  _pg.sheet = null; pgTouch(); render();
+}
+function pgMove(sid, dir) {
+  const sel = pgSel();
+  pgEnsureDraft();
+  const ws = S.progDraft.weeks;
+  const cur = ws.find(w => w.label === sel.week);
+  const list = cur && dayExercises(cur, sel.day);
+  if (!list) return;
+  const i = list.findIndex(e => e.sid === sid), j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  const nb = list[j].sid;
+  const swap = l => { const a = l.findIndex(e => e.sid === sid), b = l.findIndex(e => e.sid === nb); if (a >= 0 && b >= 0) { const t = l[a]; l[a] = l[b]; l[b] = t; } };
+  if (sel.allWeeks) ws.forEach(w => { const l = dayExercises(w, sel.day); if (l) swap(l); });
+  else swap(list);
+  pgTouch(); render();
+}
+
+/* ----- giorni, settimane, copia, progressione, scarico ----- */
+function pgAddDay() {
+  pgEnsureDraft();
+  const n = Math.max(0, ...pgDays(S.progDraft.weeks)) + 1;
+  S.progDraft.weeks.forEach(w => { w.days = w.days || {}; w.days[n] = []; });
+  S.pgSel = Object.assign(pgSel(), { day: n });
+  pgTouch(); render();
+}
+function pgDelDay() {
+  const sel = pgSel();
+  const days = pgDays(pgWeeks());
+  if (days.length <= 1) { alert('Serve almeno un giorno.'); return; }
+  if (!pgConfirmLocked(pgWeeks().map(w => w.label))) return;
+  if (!confirm('Eliminare il Giorno ' + sel.day + ' da tutte le settimane?')) return;
+  pgEnsureDraft();
+  S.progDraft.weeks.forEach(w => { delete w.days[sel.day]; });
+  pgTouch(); render();
+}
+function pgDelWeek(label) {
+  const ws = pgWeeks();
+  if (ws.length <= 1) { alert('Serve almeno una settimana.'); return; }
+  if (!pgConfirmLocked([label])) return;
+  if (!confirm('Eliminare la settimana ' + label + '?')) return;
+  pgEnsureDraft();
+  S.progDraft.weeks = S.progDraft.weeks.filter(w => w.label !== label);
+  pgTouch(); render();
+}
+function pgTool(k, v) { _pg.tool[k] = v; }
+function pgNextLabel(ws) {
+  const last = ws[ws.length - 1];
+  const nmax = Math.max(0, ...ws.map(w => w.n || 0));
+  const lab = String(last.label || 'SETT 1.1');
+  return /(\d+)\.(\d+)/.test(lab) ? lab.replace(/(\d+)\.(\d+)/, (m, a) => a + '.' + (nmax + 1)) : lab + ' ' + (nmax + 1);
+}
+function pgCopyDay() {
+  const t = _pg.tool, sel = pgSel(), ws = pgWeeks();
+  const from = t.copyFrom || sel.week, to = t.copyTo || sel.week, day = Number(t.copyDay || sel.day);
+  if (from === to) { alert('Scegli due settimane diverse.'); return; }
+  if (!pgConfirmLocked([to])) return;
+  pgEnsureDraft();
+  const src = S.progDraft.weeks.find(w => w.label === from), dst = S.progDraft.weeks.find(w => w.label === to);
+  if (!src || !dst) return;
+  dst.days[day] = pgClone(dayExercises(src, day) || []);
+  pgNotify('Giorno ' + day + ' copiato da ' + from + ' a ' + to + '.');
+  pgTouch(); render();
+}
+function pgCopyWeek() {
+  const t = _pg.tool, sel = pgSel();
+  const from = t.copyFrom || sel.week;
+  const to = t.copyTo || '__new';
+  pgEnsureDraft();
+  const src = S.progDraft.weeks.find(w => w.label === from);
+  if (!src) return;
+  if (to === '__new') {
+    const label = pgNextLabel(S.progDraft.weeks);
+    const n = Math.max(0, ...S.progDraft.weeks.map(w => w.n || 0)) + 1;
+    S.progDraft.weeks.push({ label, n, days: pgClone(src.days) });
+    pgNotify('Creata la settimana ' + label + ' copiando ' + from + '.');
+  } else {
+    if (to === from) { alert('Scegli due settimane diverse.'); return; }
+    if (!pgConfirmLocked([to])) return;
+    const dst = S.progDraft.weeks.find(w => w.label === to);
+    dst.days = pgClone(src.days);
+    pgNotify('Settimana ' + from + ' copiata su ' + to + '.');
+  }
+  pgTouch(); render();
+}
+function pgGenerate() {
+  const t = _pg.tool, ws = pgWeeks();
+  const key = t.genSid || '';
+  const [day, sid] = key.split('::');
+  if (!sid) { alert('Scegli l\'esercizio.'); return; }
+  const iFrom = Math.max(0, ws.findIndex(w => w.label === (t.genFrom || ws[0].label)));
+  let iTo = ws.findIndex(w => w.label === (t.genTo || ws[ws.length - 1].label));
+  if (iTo < iFrom) iTo = ws.length - 1;
+  const start = parseFloat(pgNum(t.genStart || '70')), step = parseFloat(pgNum(t.genStep || '2.5'));
+  const sets = parseInt(t.genSets || '3', 10) || 3, reps = parseInt(t.genReps || '5', 10) || 5;
+  if (isNaN(start) || isNaN(step)) { alert('Percentuali non valide.'); return; }
+  const labels = ws.slice(iFrom, iTo + 1).map(w => w.label);
+  if (!pgConfirmLocked(labels)) return;
+  pgEnsureDraft();
+  let n = 0;
+  labels.forEach((l, k) => {
+    const h = pgFind(S.progDraft.weeks, l, Number(day), sid);
+    if (!h) return;
+    h.e.text = pgBlocksToText([{ type: 'pct', sets, reps, pct: Math.round((start + step * k) * 10) / 10, note: '' }]);
+    n++;
+  });
+  pgNotify('Progressione applicata a ' + n + ' settimane.');
+  pgTouch(); render();
+}
+function pgDeload() {
+  const t = _pg.tool, sel = pgSel();
+  const label = t.deloadWeek || sel.week;
+  const pctDrop = parseFloat(pgNum(t.deloadPct || '10')) || 0, setsDrop = parseInt(t.deloadSets || '0', 10) || 0;
+  if (!pgConfirmLocked([label])) return;
+  pgEnsureDraft();
+  const w = S.progDraft.weeks.find(x => x.label === label);
+  if (!w) return;
+  let done = 0, skipped = 0;
+  Object.keys(w.days || {}).forEach(d => (w.days[d] || []).forEach(e => {
+    if (e.warm || !e.text) return;
+    const blocks = pgParseBlocks(e.text);
+    if (!blocks.length || blocks.some(b => b.type === 'free')) { skipped++; return; }
+    blocks.forEach(b => {
+      if (b.type === 'pct') b.pct = Math.round(b.pct * (1 - pctDrop / 100) * 2) / 2;
+      if (b.sets > 1) b.sets = Math.max(1, b.sets - setsDrop);
+    });
+    e.text = pgBlocksToText(blocks); done++;
+  }));
+  pgNotify('Scarico su ' + label + ': ' + done + ' esercizi modificati' + (skipped ? ', ' + skipped + ' lasciati com\'erano (notazione non semplice).' : '.'));
+  pgTouch(); render();
+}
+function pgMax(k, v) {
+  _pg.max = _pg.max || Object.assign({}, S.max);
+  _pg.max[k] = parseFloat(pgNum(v)) || 0;
+  const el = $('pg-stats-table'); if (el) el.innerHTML = pgStatsTableHtml();
+}
+
+/* ----- nuova scheda / duplica ----- */
+function pgNewProgram() {
+  const name = prompt('Nome della nuova scheda', 'Nuova scheda');
+  if (name == null || !name.trim()) return;
+  const nw = Math.max(1, Math.min(16, parseInt(prompt('Quante settimane? (1-16)', '4'), 10) || 4));
+  const nd = Math.max(1, Math.min(7, parseInt(prompt('Quanti giorni a settimana? (1-7)', '4'), 10) || 4));
+  if (S.prog) { try { archiveProg(S.prog); } catch (e) { } }
+  const weeks = [];
+  for (let k = 1; k <= nw; k++) { const days = {}; for (let d = 1; d <= nd; d++) days[d] = []; weeks.push({ label: 'SETT 1.' + k, n: k, days }); }
+  S.prog = { id: newProgId(), name: name.trim(), fileName: name.trim() + '.docx', weeks };
+  S.prog.base = pgClone(S.prog.weeks);
+  S.wi = 0; S.chk = {}; S.today = null; S.progDraft = null; S.pgSel = null;
+  try { archiveProg(S.prog); } catch (e) { }
+  S.view = 'programma'; save(); render();
+}
+function pgDuplicateProgram() {
+  if (!S.prog) return;
+  if (S.progDraft && !confirm('Hai modifiche non applicate: verranno scartate. Continuare?')) return;
+  try { archiveProg(S.prog); } catch (e) { }
+  const c = pgClone({ name: S.prog.name, weeks: S.prog.weeks });
+  S.prog = { id: newProgId(), name: (c.name || 'Scheda') + ' (copia)', fileName: (c.name || 'scheda') + ' (copia).docx', weeks: c.weeks };
+  S.prog.base = pgClone(S.prog.weeks);
+  S.progDraft = null; S.chk = {}; S.today = null;
+  try { archiveProg(S.prog); } catch (e) { }
+  pgNotify('Scheda duplicata: ora lavori sulla copia.');
+  save(); render();
+}
+
+/* ----- reimport del file del coach: riapplica le modifiche locali ----- */
+function pgMergeReimport(oldProg, newWeeks) {
+  const oldBase = oldProg.base || [];
+  const same = (a, b) => PG_CMP.every(k => pgNorm(a, k) === pgNorm(b, k));
+  const cell = (weeks, label, day, sid) => { const h = pgFind(weeks, label, day, sid); return h ? h.e : null; };
+  const out = { weeks: pgClone(newWeeks), applied: 0, conflicts: 0, unmatched: 0, hadEdits: false };
+  const baseLabels = new Set(oldBase.map(w => w.label));
+  const edits = [];
+  oldProg.weeks.forEach(ow => {
+    if (!baseLabels.has(ow.label)) return; // settimana aggiunta da te: viene conservata intera piu' sotto
+    Object.keys(ow.days || {}).forEach(day => {
+      const list = dayExercises(ow, day) || [];
+      list.forEach((e, idx) => {
+        const b = cell(oldBase, ow.label, day, e.sid);
+        if (!b) edits.push({ kind: 'add', label: ow.label, day, e, idx });
+        else if (!same(e, b)) edits.push({ kind: 'edit', label: ow.label, day, sid: e.sid, e, b });
+      });
+      const ob = oldBase.find(x => x.label === ow.label);
+      (ob ? (dayExercises(ob, day) || []) : []).forEach(b => {
+        if (!list.some(e => e.sid === b.sid)) edits.push({ kind: 'del', label: ow.label, day, sid: b.sid, b });
+      });
+    });
+  });
+  out.hadEdits = edits.length > 0 || oldProg.weeks.some(w => !baseLabels.has(w.label));
+  // conflitti: il coach ha cambiato la stessa riga
+  const plan = [];
+  edits.forEach(ed => {
+    if (ed.kind === 'add') { plan.push({ ed, ok: true }); return; }
+    const nc = cell(out.weeks, ed.label, ed.day, ed.sid);
+    if (!nc) { out.unmatched++; return; }
+    if (ed.kind === 'del') { const conflict = !same(nc, ed.b); plan.push({ ed, nc, conflict }); return; }
+    const fields = PG_CMP.filter(k => pgNorm(ed.e, k) !== pgNorm(ed.b, k));
+    const confl = fields.filter(k => pgNorm(nc, k) !== pgNorm(ed.b, k) && pgNorm(nc, k) !== pgNorm(ed.e, k));
+    plan.push({ ed, nc, fields, confl, conflict: confl.length > 0 });
+  });
+  out.conflicts = plan.filter(p => p.conflict).length;
+  let keepMine = true;
+  if (out.conflicts) {
+    keepMine = confirm('Hai ' + plan.length + ' modifiche locali; in ' + out.conflicts + ' casi il coach ha cambiato anche la stessa riga.\n\nOK = tieni le tue modifiche anche nei conflitti\nAnnulla = nei conflitti usa la versione del coach (le altre tue modifiche restano)');
+  }
+  plan.forEach(p => {
+    const ed = p.ed;
+    if (ed.kind === 'add') {
+      const w = out.weeks.find(x => x.label === ed.label);
+      if (!w) { out.unmatched++; return; }
+      const l = dayExercises(w, ed.day) || (w.days[ed.day] = []);
+      const c = pgClone(ed.e);
+      while (l.some(x => x.sid === c.sid)) c.sid += '+';
+      l.splice(Math.min(ed.idx, l.length), 0, c); out.applied++;
+      return;
+    }
+    if (ed.kind === 'del') {
+      if (p.conflict && !keepMine) return;
+      const h = pgFind(out.weeks, ed.label, ed.day, ed.sid); if (h) { h.list.splice(h.idx, 1); out.applied++; }
+      return;
+    }
+    p.fields.forEach(k => {
+      if (p.confl.includes(k) && !keepMine) return;
+      if (k === 'warm') p.nc.warm = !!ed.e.warm;
+      else if (ed.e[k] == null || ed.e[k] === '') delete p.nc[k];
+      else p.nc[k] = ed.e[k];
+    });
+    out.applied++;
+  });
+  // ordine scelto da te (solo righe presenti in entrambe)
+  oldProg.weeks.forEach(ow => {
+    if (!baseLabels.has(ow.label)) return;
+    const nw = out.weeks.find(x => x.label === ow.label);
+    if (!nw) return;
+    Object.keys(ow.days || {}).forEach(day => {
+      const nl = dayExercises(nw, day); const ol = dayExercises(ow, day) || [];
+      if (!nl) return;
+      const inNew = new Set(nl.map(e => e.sid));
+      const userSeq = ol.map(e => e.sid).filter(s => inNew.has(s));
+      const ob = oldBase.find(x => x.label === ow.label);
+      const baseSeq = ((ob && dayExercises(ob, day)) || []).map(e => e.sid).filter(s => userSeq.includes(s));
+      if (userSeq.join() === baseSeq.join()) return;
+      const common = new Set(userSeq), by = {}; nl.forEach(e => { by[e.sid] = e; });
+      const slots = []; nl.forEach((e, i) => { if (common.has(e.sid)) slots.push(i); });
+      const arr = nl.slice(); slots.forEach((pos, k) => { arr[pos] = by[userSeq[k]]; });
+      nw.days[day] = arr;
+      out.reordered = (out.reordered || 0) + 1; out.applied++;
+    });
+  });
+  if (out.reordered) out.hadEdits = true;
+  // settimane aggiunte da te
+  oldProg.weeks.forEach(ow => { if (!baseLabels.has(ow.label) && !out.weeks.some(x => x.label === ow.label)) out.weeks.push(pgClone(ow)); });
+  return out;
+}
+
+/* ----- esportazione .docx (stesso formato che legge parseDocx) ----- */
+async function pgBuildDocx() {
+  const weeks = pgWeeks();
+  const x = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const tc = t => `<w:tc><w:p><w:r><w:t xml:space="preserve">${x(t)}</w:t></w:r></w:p></w:tc>`;
+  const rows = [['', ...weeks.map(w => w.label)]];
+  pgDays(weeks).forEach(d => {
+    rows.push(['GIORNO ' + d]);
+    const keys = [], seen = new Set(), cm = {};
+    weeks.forEach((w, wi) => (dayExercises(w, d) || []).forEach(e => {
+      const nm = (e.warm && !/riscaldamento|\bpre\b/i.test(e.name)) ? 'Riscaldamento ' + e.name : e.name;
+      const key = (e.sid || nm) + '\u0001' + nm;
+      if (!seen.has(key)) { seen.add(key); keys.push({ key, nm }); cm[key] = {}; }
+      cm[key][wi] = e.text || '';
+    }));
+    keys.forEach(({ key, nm }) => {
+      const texts = weeks.map((w, wi) => (cm[key][wi] != null ? cm[key][wi] : ''));
+      const allSame = weeks.length > 1 && texts.every(t => t && t === texts[0]);
+      rows.push(allSame ? [nm, texts[0]] : [nm, ...texts]);
+    });
+  });
+  const NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const body = `<w:tbl>${rows.map(r => `<w:tr>${r.map(tc).join('')}</w:tr>`).join('')}</w:tbl><w:p/>`;
+  const z = new JSZip();
+  z.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+  z.file('_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+  z.file('word/document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="${NS}"><w:body>${body}</w:body></w:document>`);
+  return z.generateAsync({ type: 'uint8array' });
+}
+async function pgExportDocx() {
+  try {
+    if (S.progDraft && !confirm('Hai modifiche non applicate: l\'esportazione include anche la bozza. Continuare?')) return;
+    const bytes = await pgBuildDocx();
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = String((S.prog && S.prog.name) || 'scheda').replace(/[^\w\-. ]+/g, '_') + '-modificata.docx';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  } catch (e) { alert('Esportazione non riuscita: ' + (e && e.message ? e.message : e)); }
+}
+
+/* ----- note dell'esercizio nella sessione di allenamento ----- */
+function exProgNoteHtml(e) {
+  if (!e || (!e.note && !e.coachNote && !e.subOf)) return '';
+  let h = '';
+  if (e.coachNote) h += '<div><b>Coach:</b> ' + esc(e.coachNote) + '</div>';
+  if (e.note) h += '<div><b>Nota:</b> ' + esc(e.note) + '</div>';
+  if (e.subOf) h += '<div><b>Sostituisce:</b> ' + esc(e.subOf) + '</div>';
+  return '<div class="ex-prog-note">' + h + '</div>';
+}
+
+/* =============================== UI =============================== */
+const pgChip = (on, js, label) => `<button type="button" class="pg-chip ${on ? 'on' : ''}" onclick="${js}">${label}</button>`;
+function pgPreviewHtml() {
+  const sh = _pg.sheet; if (!sh) return '';
+  const text = String(sh.f.text || '').trim();
+  if (!text) return '<span class="mut">Nessuna prescrizione</span>';
+  const lift = sh.f.lift || null;
+  const parts = splitPrescriptionBlocks(text);
+  const list = parts.length ? parts : [text];
+  const sets = list.reduce((a, p) => a + (parseSets(p).count || 0), 0);
+  const kgs = list.map(p => prescribedKg(p, lift)).filter(v => v != null);
+  const warn = (!/\d/.test(text) && !/istintiva|mav|amrap|emom|singola|doppia|tripla|cluster|ramp/i.test(text))
+    ? '<div class="pg-warn">Notazione non riconosciuta: l\'app userà 3 serie.</div>' : '';
+  return `<div class="dt">${fmt(text, lift)}</div><div class="mut pg-small">${sets} serie in totale${kgs.length ? ' · carichi: ' + kgs.map(v => v + ' kg').join(' / ') : ''}</div>${warn}`;
+}
+function pgBlockHtml(b, i) {
+  const num = (k, ph, step) => `<input type="number" inputmode="decimal" step="${step || 'any'}" placeholder="${ph}" value="${esc(b[k] == null ? '' : b[k])}" oninput="pgBlockSet(${i},'${k}',this.value)">`;
+  const sr = `<div class="pg-grid">${num('sets', 'Serie')}${num('reps', 'Rip')}</div>`;
+  let body = '';
+  if (b.type === 'pct') body = sr + `<div class="pg-grid">${num('pct', '% del massimale')}<input type="text" placeholder="Nota (es. no var)" value="${esc(b.note || '')}" oninput="pgBlockSet(${i},'note',this.value)"></div>`;
+  else if (b.type === 'rpe') body = sr + `<div class="pg-grid"><input type="text" inputmode="decimal" placeholder="RPE (es. 8 o 7-8)" value="${esc(b.rpe || '')}" oninput="pgBlockSet(${i},'rpe',this.value)"><input type="text" placeholder="Nota" value="${esc(b.note || '')}" oninput="pgBlockSet(${i},'note',this.value)"></div>`;
+  else if (b.type === 'sr') body = sr + `<input type="text" placeholder="Nota (es. manubri)" value="${esc(b.note || '')}" oninput="pgBlockSet(${i},'note',this.value)">`;
+  else if (b.type === 'ist') body = `<input type="text" placeholder="Nota" value="${esc(b.note || '')}" oninput="pgBlockSet(${i},'note',this.value)">`;
+  else body = `<input type="text" placeholder="Testo libero" value="${esc(b.raw || '')}" oninput="pgBlockSet(${i},'raw',this.value)">`;
+  const opt = (v, l) => `<option value="${v}" ${b.type === v ? 'selected' : ''}>${l}</option>`;
+  return `<div class="pg-block"><div class="pg-block-head"><select onchange="pgBlockType(${i}, this.value)">${opt('sr', 'Serie × rip')}${opt('pct', 'Percentuale')}${opt('rpe', 'RPE')}${opt('ist', 'Istintiva')}${opt('free', 'Testo libero')}</select><button type="button" class="pg-x" onclick="pgBlockDel(${i})" aria-label="Elimina blocco">×</button></div>${body}</div>`;
+}
+function pgSheetHtml() {
+  const sh = _pg.sheet;
+  if (!sh || S.view !== 'programma' || !S.prog) return '';
+  const f = sh.f, ws = pgWeeks();
+  const names = new Set();
+  Object.values(S.exReg || {}).forEach(r => r && r.name && names.add(r.name));
+  ws.forEach(w => Object.keys(w.days || {}).forEach(d => (w.days[d] || []).forEach(e => e.name && names.add(e.name))));
+  const dl = '<datalist id="pg-names">' + [...names].map(n => `<option value="${esc(n)}">`).join('') + '</datalist>';
+  const labels = pgScopeLabels(sh);
+  const isNew = sh.mode === 'new';
+  const uni = !isNew ? pgUniform(ws, sh.day, sh.sid, sh.orig) : null;
+  const scopes = isNew
+    ? [['this', 'Solo questa settimana'], ['all', 'Tutte le settimane']]
+    : [['this', 'Solo questa settimana'], ['all', 'Tutte le settimane'], ['from', 'Da questa in poi'], ['same', 'Dove è ancora uguale'], ['pick', 'Scegli settimane']];
+  const scopeHtml = scopes.map(([v, l]) => pgChip(sh.scope === v, `pgScope('${v}')`, l)).join('');
+  const pickHtml = sh.scope === 'pick' ? '<div class="pg-chips">' + ws.filter(w => isNew || pgFind([w], w.label, sh.day, sh.sid)).map(w =>
+    `<label class="pg-chip ${(sh.pick || []).includes(w.label) || w.label === sh.week ? 'on' : ''}"><input type="checkbox" style="display:none" ${(sh.pick || []).includes(w.label) || w.label === sh.week ? 'checked' : ''} onchange="pgPick(${jq(w.label)}, this.checked)">${esc(w.label.replace(/^SETT\s*/i, ''))}</label>`).join('') + '</div>' : '';
+  const diffInfo = (!isNew && uni && uni.diff.length && sh.scope !== 'this')
+    ? `<div class="pg-warn">Questa riga è diversa in: ${esc(uni.diff.join(', '))}. Con questo ambito vengono sovrascritte solo le parti che modifichi.</div>` : '';
+  const lockInfo = pgLocked(labels).length ? `<div class="pg-warn">Settimane già fatte: ${esc(pgLocked(labels).join(', '))}</div>` : '';
+  const variants = f.lift && PG_VARIANTS[f.lift] ? `<label class="pg-lbl">Variante</label><select onchange="pgVariant(this.value)"><option value="">Scegli…</option>${PG_VARIANTS[f.lift].map(v => `<option value="${esc(v)}" ${v === f.name ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>` : '';
+  const schemes = `<label class="pg-lbl">Schema</label><select onchange="pgScheme(this.value);this.value=''"><option value="">Scegli uno schema…</option>${PG_SCHEMES.map(s => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select>`;
+  const prescr = sh.textMode
+    ? `<textarea id="pg-raw" rows="3" oninput="pgSet('text', this.value)">${esc(f.text)}</textarea><button type="button" class="btn" onclick="pgTextMode(false)">Torna ai blocchi</button>`
+    : sh.blocks.map((b, i) => pgBlockHtml(b, i)).join('') + `<div class="row"><button type="button" class="btn" onclick="pgBlockAdd()">+ Blocco</button><button type="button" class="btn" onclick="pgTextMode(true)">Modifica come testo</button></div>`;
+  const days = pgDays(ws).filter(d => d !== sh.day);
+  const extra = isNew ? '' : `
+    <div class="pg-sec">Altre azioni (valgono per l'ambito scelto)</div>
+    <div class="row"><select onchange="_pg.sheet.moveTo=this.value"><option value="">Sposta nel giorno…</option>${days.map(d => `<option value="${d}">Giorno ${d}</option>`).join('')}</select><button type="button" class="btn" style="margin-top:0" onclick="pgMoveToDay()">Sposta</button></div>
+    <div class="row"><input type="text" list="pg-names" placeholder="Sostituisci con…" value="${esc(sh.subName || '')}" oninput="_pg.sheet.subName=this.value"><button type="button" class="btn" style="margin-top:0" onclick="pgSubstitute()">Sostituisci</button></div>
+    ${sh.subOf ? `<button type="button" class="btn" onclick="pgUnsub()">Torna all'originale (${esc(sh.subOf)})</button>` : ''}
+    <div class="row"><button type="button" class="btn" onclick="pgDuplicateSheet()">Duplica</button>${S.prog.base && pgIsModified(Object.assign({ sid: sh.sid }, sh.orig), sh.week, sh.day) ? '<button type="button" class="btn" onclick="pgRevertCell()">Ripristina come da coach</button>' : ''}</div>
+    <button type="button" class="btn pg-danger" onclick="pgDeleteSheet()">Elimina esercizio</button>`;
+  return `<div class="modal-backdrop piano-session-backdrop" id="pg-sheet" onclick="pgClose()">
+    <div class="modal-card piano-session-card pg-sheet" onclick="event.stopPropagation()">
+      <p class="big" style="margin-bottom:2px">${isNew ? 'Nuovo esercizio' : 'Modifica esercizio'}</p>
+      <p class="mut" style="margin-bottom:10px">${esc(sh.week)} · Giorno ${sh.day}</p>
+      ${dl}
+      <label class="pg-lbl">Nome</label>
+      <input type="text" list="pg-names" id="pg-name" value="${esc(f.name)}" oninput="pgSet('name', this.value)" placeholder="Nome dell'esercizio">
+      <div class="pg-chips" style="margin-top:8px">
+        ${pgChip(f.warm, `pgSet('warm', ${!f.warm})`, 'Riscaldamento')}
+        ${['', 's', 'b', 'd'].map(l => pgChip(!f.warm && f.lift === l, `pgSet('lift','${l}')`, l === '' ? 'Complementare' : ({ s: 'Squat', b: 'Panca', d: 'Stacco' })[l])).join('')}
+      </div>
+      ${variants}
+      <div class="pg-sec">Prescrizione</div>
+      ${schemes}
+      ${prescr}
+      <div class="pg-preview" id="pg-preview">${pgPreviewHtml()}</div>
+      <label class="pg-lbl">Nota tua</label>
+      <input type="text" value="${esc(f.note)}" oninput="pgSet('note', this.value)" placeholder="Es. tecnica, sensazioni">
+      <label class="pg-lbl">Nota del coach</label>
+      <input type="text" value="${esc(f.coachNote)}" oninput="pgSet('coachNote', this.value)" placeholder="Es. indicazioni scritte dal coach">
+      <div class="pg-sec">Applica a</div>
+      <div class="pg-chips">${scopeHtml}</div>${pickHtml}
+      <div class="mut pg-small">${labels.length} settimana/e: ${esc(labels.join(', '))}</div>
+      ${diffInfo}${lockInfo}
+      <div class="row" style="margin-top:12px"><button type="button" class="btn" onclick="pgClose()">Annulla</button><button type="button" class="btn pri" onclick="pgSaveSheet()">Salva in bozza</button></div>
+      ${extra}
+    </div></div>`;
+}
+function pgDayHtml(sel) {
+  const ws = pgWeeks();
+  const w = ws.find(x => x.label === sel.week);
+  const list = (w && dayExercises(w, sel.day)) || [];
+  const lint = pgLint(ws).filter(x => x.week === sel.week && Number(x.day) === sel.day);
+  const st = w ? pgWeekStats(w, S.max) : { days: {} };
+  const dd = st.days[sel.day] || { sets: 0, min: 0 };
+  const done = ((S.done && S.done[sel.week]) || []).map(Number).includes(sel.day);
+  const cards = list.map((e, i) => {
+    const badge = e.warm ? 'Riscaldamento' : (e.lift ? 'Fondamentale' : 'Complementare');
+    const uni = pgUniform(ws, sel.day, e.sid, e);
+    const meta = e.warm ? '' : (uni.diff.length ? `Diverso in: ${esc(uni.diff.join(', '))}` : `Uguale in ${uni.n} settimane`);
+    const mod = pgIsModified(e, sel.week, sel.day);
+    return `<div class="pg-ex ${e.lift && !e.warm ? 'main' : ''} ${e.warm ? 'warm' : ''}">
+      <div class="pg-ex-top"><div class="pg-ex-nm">${esc(e.name)}${mod ? ' <span class="pg-dot" title="Modificato rispetto al coach">●</span>' : ''}</div>
+        <div class="pg-ex-ctrl"><button type="button" aria-label="Su" ${i === 0 ? 'disabled' : ''} onclick="pgMove(${jq(e.sid)}, -1)">▲</button><button type="button" aria-label="Giù" ${i === list.length - 1 ? 'disabled' : ''} onclick="pgMove(${jq(e.sid)}, 1)">▼</button></div></div>
+      <div class="pg-ex-txt">${fmt(e.text || '', e.lift)}</div>
+      <div class="pg-ex-meta"><span class="pg-badge">${badge}</span> ${meta}${e.subOf ? ' · sostituisce ' + esc(e.subOf) : ''}</div>
+      ${e.note || e.coachNote ? `<div class="pg-ex-meta">${e.coachNote ? 'Coach: ' + esc(e.coachNote) : ''} ${e.note ? 'Nota: ' + esc(e.note) : ''}</div>` : ''}
+      <button type="button" class="btn pg-edit" onclick="pgOpen(${jq(e.sid)})">Modifica</button></div>`;
+  }).join('') || '<p class="mut">Nessun esercizio in questo giorno.</p>';
+  return `${done ? '<div class="pg-warn">Questo giorno è già stato fatto in questa settimana.</div>' : ''}
+    <div class="pg-order"><label><input type="checkbox" ${sel.allWeeks ? 'checked' : ''} onchange="pgSetSel('allWeeks', this.checked)"> Riordina in tutte le settimane</label></div>
+    ${cards}
+    <button type="button" class="btn pri" onclick="pgOpenNew()">+ Aggiungi esercizio</button>
+    <div class="mut pg-small" style="margin-top:8px">${dd.sets} serie · durata stimata ~${dd.min} min</div>
+    ${lint.length ? '<div class="pg-warn">' + lint.map(l => esc(l.msg)).join('<br>') + '</div>' : ''}`;
+}
+function pgMatrixHtml(sel) {
+  const ws = pgWeeks();
+  let html = `<div class="pg-chips">${pgChip(sel.mainOnly, `pgSetSel('mainOnly', ${!sel.mainOnly})`, 'Solo fondamentali')}</div><div class="pg-mx-wrap"><table class="pg-mx"><thead><tr><th></th>${ws.map(w => `<th>${esc(w.label.replace(/^SETT\s*/i, ''))}</th>`).join('')}</tr></thead><tbody>`;
+  pgDays(ws).forEach(d => {
+    const sids = [], seen = new Set();
+    ws.forEach(w => (dayExercises(w, d) || []).forEach(e => { if (!seen.has(e.sid)) { seen.add(e.sid); sids.push(e.sid); } }));
+    const rows = sids.filter(sid => ws.some(w => { const h = pgFind([w], w.label, d, sid); return h && !h.e.warm && (!sel.mainOnly || h.e.lift); }));
+    if (!rows.length) return;
+    html += `<tr class="pg-mx-day"><td colspan="${ws.length + 1}">Giorno ${d}</td></tr>`;
+    rows.forEach(sid => {
+      let name = '';
+      ws.forEach(w => { const h = pgFind([w], w.label, d, sid); if (h && !name) name = h.e.name; });
+      html += `<tr><th>${esc(name)}</th>` + ws.map(w => {
+        const h = pgFind([w], w.label, d, sid);
+        if (!h) return '<td class="pg-mx-empty">—</td>';
+        const t = String(h.e.text || '');
+        return `<td class="${pgIsModified(h.e, w.label, d) ? 'mod' : ''}" onclick="pgOpen(${jq(sid)}, ${jq(w.label)}, ${d})">${esc(t.length > 24 ? t.slice(0, 23) + '…' : t) || '·'}</td>`;
+      }).join('') + '</tr>';
+    });
+  });
+  return html + '</tbody></table></div><p class="mut pg-small">Tocca una cella per modificare quella settimana.</p>';
+}
+function pgStatsTableHtml() {
+  const ws = pgWeeks(), mx = _pg.max || S.max;
+  const stats = ws.map(w => ({ label: w.label, s: pgWeekStats(w, mx) }));
+  const vals = stats.map(x => x.s.ton || x.s.sets);
+  const maxV = Math.max(1, ...vals);
+  const bw = 26, gap = 10, H = 70;
+  const bars = stats.map((x, i) => {
+    const h = Math.max(2, Math.round((vals[i] / maxV) * H));
+    return `<rect x="${i * (bw + gap)}" y="${H - h}" width="${bw}" height="${h}" rx="4" fill="var(--ac,#3e8bff)"></rect><text x="${i * (bw + gap) + bw / 2}" y="${H + 14}" text-anchor="middle" font-size="9" fill="currentColor">${esc(x.label.replace(/^SETT\s*/i, ''))}</text>`;
+  }).join('');
+  const W = Math.max(120, stats.length * (bw + gap));
+  const ton = stats.some(x => x.s.ton);
+  return `<div class="pg-chart"><svg viewBox="0 0 ${W} ${H + 20}" width="100%" height="${H + 20}" preserveAspectRatio="xMinYMid meet" role="img" aria-label="${ton ? 'Tonnellaggio' : 'Serie'} per settimana">${bars}</svg></div>
+    <p class="mut pg-small">${ton ? 'Barre: tonnellaggio dei fondamentali a percentuale (kg)' : 'Barre: serie totali'}</p>
+    <div class="pg-mx-wrap"><table class="pg-mx"><thead><tr><th>Sett.</th><th>Serie</th><th>Tonn.</th><th>Int. media</th></tr></thead><tbody>${stats.map(x => `<tr><th>${esc(x.label)}</th><td>${x.s.sets}</td><td>${x.s.ton ? Math.round(x.s.ton) : '—'}</td><td>${x.s.avg != null ? x.s.avg.toFixed(1) + '%' : '—'}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function pgStatsHtml() {
+  const m = _pg.max || S.max || {};
+  const inp = (k, l) => `<div><label class="pg-lbl">${l}</label><input type="number" inputmode="decimal" value="${esc(m[k] || '')}" oninput="pgMax('${k}', this.value)"></div>`;
+  return `<div class="pg-sec">Anteprima con massimali diversi (non li salva)</div><div class="pg-grid3">${inp('s', 'Squat')}${inp('b', 'Panca')}${inp('d', 'Stacco')}</div><div id="pg-stats-table">${pgStatsTableHtml()}</div>`;
+}
+function pgToolsHtml(sel) {
+  const ws = pgWeeks(), t = _pg.tool;
+  const wopt = (cur, extra) => (extra || '') + ws.map(w => `<option value="${esc(w.label)}" ${w.label === cur ? 'selected' : ''}>${esc(w.label)}</option>`).join('');
+  const days = pgDays(ws);
+  const mains = [];
+  days.forEach(d => { const seen = new Set(); ws.forEach(w => (dayExercises(w, d) || []).forEach(e => { if (e.lift && !e.warm && !seen.has(e.sid)) { seen.add(e.sid); mains.push({ d, sid: e.sid, name: e.name }); } })); });
+  const lint = pgLint(ws);
+  const vs = (S.prog && S.prog.versions) || [];
+  return `
+    <div class="pg-sec">Copia</div>
+    <div class="row"><select onchange="pgTool('copyFrom',this.value)">${wopt(t.copyFrom || sel.week)}</select><select onchange="pgTool('copyTo',this.value)">${wopt(t.copyTo, '<option value="__new">Nuova settimana</option>')}</select></div>
+    <div class="row"><button type="button" class="btn" onclick="pgCopyWeek()">Copia settimana</button><select onchange="pgTool('copyDay',this.value)">${days.map(d => `<option value="${d}" ${Number(t.copyDay || sel.day) === d ? 'selected' : ''}>Giorno ${d}</option>`).join('')}</select><button type="button" class="btn" onclick="pgCopyDay()">Copia giorno</button></div>
+    <div class="pg-sec">Generatore di progressione</div>
+    <select onchange="pgTool('genSid',this.value)"><option value="">Esercizio…</option>${mains.map(m => `<option value="${m.d}::${esc(m.sid)}" ${t.genSid === m.d + '::' + m.sid ? 'selected' : ''}>Giorno ${m.d} · ${esc(m.name)}</option>`).join('')}</select>
+    <div class="row"><select onchange="pgTool('genFrom',this.value)">${wopt(t.genFrom || ws[0].label)}</select><select onchange="pgTool('genTo',this.value)">${wopt(t.genTo || ws[ws.length - 1].label)}</select></div>
+    <div class="pg-grid3"><input type="number" inputmode="decimal" placeholder="% inizio" value="${esc(t.genStart || '70')}" oninput="pgTool('genStart',this.value)"><input type="number" inputmode="decimal" placeholder="+% a sett." value="${esc(t.genStep || '2.5')}" oninput="pgTool('genStep',this.value)"><input type="number" placeholder="Serie" value="${esc(t.genSets || '3')}" oninput="pgTool('genSets',this.value)"></div>
+    <input type="number" placeholder="Rip" value="${esc(t.genReps || '5')}" oninput="pgTool('genReps',this.value)">
+    <button type="button" class="btn" onclick="pgGenerate()">Applica progressione</button>
+    <div class="pg-sec">Settimana di scarico</div>
+    <div class="row"><select onchange="pgTool('deloadWeek',this.value)">${wopt(t.deloadWeek || sel.week)}</select><input type="number" placeholder="-% carico" value="${esc(t.deloadPct || '10')}" oninput="pgTool('deloadPct',this.value)"><input type="number" placeholder="-serie" value="${esc(t.deloadSets || '0')}" oninput="pgTool('deloadSets',this.value)"></div>
+    <button type="button" class="btn" onclick="pgDeload()">Applica scarico</button>
+    <div class="pg-sec">Giorni e settimane</div>
+    <div class="row"><button type="button" class="btn" onclick="pgAddDay()">+ Giorno</button><button type="button" class="btn" onclick="pgDelDay()">Elimina Giorno ${sel.day}</button></div>
+    <div class="row"><select onchange="pgTool('delWeek',this.value)">${wopt(t.delWeek || sel.week)}</select><button type="button" class="btn" style="margin-top:0" onclick="pgDelWeek(_pg.tool.delWeek || pgSel().week)">Elimina settimana</button></div>
+    <div class="pg-sec">Controlli (${lint.length})</div>
+    ${lint.length ? '<div class="pg-warn">' + lint.slice(0, 30).map(l => esc(l.week) + ' G' + esc(l.day) + ': ' + esc(l.msg)).join('<br>') + '</div>' : '<p class="mut pg-small">Nessun problema trovato.</p>'}
+    <div class="pg-sec">Versioni</div>
+    ${vs.length ? vs.map((v, i) => `<div class="pg-ver"><span>${esc(new Date(v.ts).toLocaleString('it-IT'))} · ${esc(v.label)}</span><button type="button" onclick="pgRestoreVersion(${i})">Ripristina</button></div>`).join('') : '<p class="mut pg-small">Nessuna versione salvata: se ne crea una a ogni “Applica”.</p>'}
+    <div class="pg-sec">Scheda</div>
+    <button type="button" class="btn" onclick="pgRenameProg()">Rinomina scheda</button>
+    <button type="button" class="btn" onclick="pgRestoreBaseAll()">Ripristina tutto come da coach</button>
+    <button type="button" class="btn" onclick="pgExportDocx()">Esporta .docx</button>
+    <div class="row"><button type="button" class="btn" onclick="pgDuplicateProgram()">Duplica scheda</button><button type="button" class="btn" onclick="pgNewProgram()">Nuova scheda vuota</button></div>`;
+}
+function programma() {
+  if (!S.prog) {
+    return `<div class="card"><p class="big">Programma</p><p class="mut">Nessuna scheda caricata.</p>
+      <label class="btn pri" style="cursor:pointer">Carica scheda (.docx)<input type="file" accept=".docx" style="display:none" onchange="imp(this)"></label>
+      <button type="button" class="btn" onclick="pgNewProgram()">Crea scheda da zero</button></div>`;
+  }
+  pgInit();
+  const sel = pgSel(), ws = pgWeeks();
+  const d = S.progDraft;
+  const weekChips = ws.map(w => {
+    const dn = (((S.done && S.done[w.label]) || []).length) > 0;
+    return `<button type="button" class="pg-chip ${w.label === sel.week ? 'on' : ''}" onclick="pgSetSel('week', ${jq(w.label)})">${esc(w.label.replace(/^SETT\s*/i, ''))}${dn ? ' ✓' : ''}</button>`;
+  }).join('');
+  const dayChips = pgDays(ws).map(n => `<button type="button" class="pg-chip ${n === sel.day ? 'on' : ''}" onclick="pgSetSel('day', ${n})">Giorno ${n}</button>`).join('');
+  const tabs = [['giorno', 'Giorno'], ['matrice', 'Matrice'], ['stats', 'Statistiche'], ['strumenti', 'Strumenti']]
+    .map(([k, l]) => pgChip(sel.tab === k, `pgSetSel('tab','${k}')`, l)).join('');
+  const body = sel.tab === 'matrice' ? pgMatrixHtml(sel) : sel.tab === 'stats' ? pgStatsHtml() : sel.tab === 'strumenti' ? pgToolsHtml(sel) : pgDayHtml(sel);
+  const notice = _pg.notice ? `<div class="pg-notice">${esc(_pg.notice)}</div>` : '';
+  const vs = (S.prog.versions || []);
+  return `<div class="card pg-head">
+      <p class="big" style="margin-bottom:2px">Programma</p>
+      <p class="mut" style="margin:0 0 8px">${esc(S.prog.name || '')}</p>
+      ${d ? `<div class="pg-draft"><b>Bozza: ${d.changes || 0} modifiche</b> non ancora applicate<div class="row"><button type="button" class="btn" onclick="pgDiscard()">Scarta</button><button type="button" class="btn pri" onclick="pgApply()">Applica</button></div></div>`
+        : (vs.length ? `<button type="button" class="btn pg-undo" onclick="pgRestoreVersion(0)">Annulla ultima applicazione</button>` : '')}
+      ${notice}
+      <div class="pg-chips">${tabs}</div>
+    </div>
+    <div class="card">
+      ${sel.tab === 'strumenti' || sel.tab === 'stats' ? '' : `<div class="pg-scroll">${weekChips}</div>`}
+      ${sel.tab === 'giorno' ? `<div class="pg-scroll">${dayChips}</div>` : ''}
+      ${body}
+    </div>`;
+}
+
 function render() {
   try {
     // preserva scroll (popup piano + pagina allenamento)
@@ -4108,16 +5202,18 @@ function render() {
 
     const w = S.prog && W(), ac = S.view === 'oggi' && S.today && S.today.type === 'train' && S.today.day != null && S.today.day !== 'comp' ? AC[(S.today.day - 1) % 4] : '#3e8bff';
     document.documentElement.style.setProperty('--ac', ac);
-    const t0 = $('t0'), t1 = $('t1'), t2 = $('t2');
+    const t0 = $('t0'), t1 = $('t1'), t2 = $('t2'), t3 = $('t3');
     if (t0) t0.className = S.view === 'oggi' ? 'on' : '';
     if (t1) t1.className = S.view === 'piano' ? 'on' : '';
     if (t2) t2.className = S.view === 'storico' ? 'on' : '';
+    if (t3) t3.className = S.view === 'programma' ? 'on' : '';
     let body = '';
     if (S.view === 'oggi') body = oggi();
     else if (S.view === 'storico') body = storico();
+    else if (S.view === 'programma') body = programma();
     else body = piano();
-    $('app').innerHTML = body + dayModalHtml() + pianoSessionHtml() + compModalHtml() + restPickerHtml();
-    document.body.classList.toggle('modal-open', !!(S.dayModal || S.restPicker || S.pianoSession || S.compModal));
+    $('app').innerHTML = body + dayModalHtml() + pianoSessionHtml() + compModalHtml() + restPickerHtml() + pgSheetHtml();
+    document.body.classList.toggle('modal-open', !!(S.dayModal || S.restPicker || S.pianoSession || S.compModal || (_pg.sheet && S.view === 'programma')));
     bindRestButtons();
 
     // ripristina scroll senza far ripartire dall'alto
@@ -4170,6 +5266,7 @@ function render() {
 
 rebuildPianoFromStorico();
 try { migrateToV2(); } catch (e) { console.error(e); }
+try { pgInit(); } catch (e) { console.error(e); }
 render();
 // Espone funzioni usate dagli onclick inline (iOS / strict)
 window.startRest = startRest;

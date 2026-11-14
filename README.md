@@ -9,7 +9,7 @@ All logic runs in the browser (`script.js`). The server (Vercel) only serves the
 ## Table of Contents
 
 1. [Features overview](#features-overview)
-2. [The three screens](#the-three-screens)
+2. [The four screens](#the-four-screens)
 3. [Importing the program (.docx)](#importing-the-program-docx)
 4. [How the program text is read](#how-the-program-text-is-read)
 5. [Workout: sets, weights and rules](#workout-sets-weights-and-rules)
@@ -17,13 +17,14 @@ All logic runs in the browser (`script.js`). The server (Vercel) only serves the
 7. [Rest timer](#rest-timer)
 8. [Accessories (extra, outside the program)](#accessories-extra-outside-the-program)
 9. [Plan: weeks and Mon-Sun calendar](#plan-weeks-and-mon-sun-calendar)
-10. [History, CSV export and import](#history-csv-export-and-import)
-11. [Push notifications and daily popup](#push-notifications-and-daily-popup)
-12. [Saved data and limits](#saved-data-and-limits)
-13. [Project structure](#project-structure)
-14. [Vercel deployment](#vercel-deployment)
-15. [Local development and tests](#local-development-and-tests)
-16. [Troubleshooting](#troubleshooting)
+10. [Program editor](#program-editor)
+11. [History, CSV export and import](#history-csv-export-and-import)
+12. [Push notifications and daily popup](#push-notifications-and-daily-popup)
+13. [Saved data and limits](#saved-data-and-limits)
+14. [Project structure](#project-structure)
+15. [Vercel deployment](#vercel-deployment)
+16. [Local development and tests](#local-development-and-tests)
+17. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -45,7 +46,8 @@ All logic runs in the browser (`script.js`). The server (Vercel) only serves the
 | **Plan** | Maxes, notifications, weeks with 7 editable Mon-Sun dots |
 | **Workout history** | All workouts grouped by program, with delete and CSV export/import |
 | **Program switching** | You can load a new program without losing the history of older ones; the app recognizes whether a file is an update of a known program or a new one |
-| **Backup** | One-tap JSON backup of all app data from the Plan |
+| **Program editor** | A dedicated tab to edit the program: exercise names, sets/reps/percentages, order, per week or for all weeks, with draft, versions, undo and re-application of your edits when the coach sends a new file |
+| **Backup** | One-tap JSON backup of all app data from the Plan, and restore from a backup file |
 | **Calendar** | Link for adding the workout to Google Calendar with exercises and kg |
 | **Push notifications** | Morning reminder, enabled/disabled from the Plan, with a test notification |
 | **Daily popup** | “What day is it today?” on the first access of the day or when tapping the notification |
@@ -54,9 +56,9 @@ All logic runs in the browser (`script.js`). The server (Vercel) only serves the
 
 ---
 
-## The three screens
+## The four screens
 
-The bottom bar has three tabs: **Today**, **Plan**, **History**. If you have not loaded a program yet, Today and Plan show the “Load the program” card.
+The bottom bar has four tabs: **Today**, **Plan**, **Program**, **History**. If you have not loaded a program yet, Today and Plan show the “Load the program” card.
 
 ### Today
 
@@ -82,6 +84,12 @@ The bottom bar has three tabs: **Today**, **Plan**, **History**. If you have not
 
 - **Download data backup (.json)**: saves a copy of all the app data (history, logs, settings).
 
+- **Restore backup (.json)**: replaces all current data with the content of a backup file (see [Backup](#backup)).
+
+### Program
+
+The editor for the program itself (names, sets, reps, order, notes). See [Program editor](#program-editor).
+
 ### History
 
 - CSV export and import tools.
@@ -104,7 +112,7 @@ The parser looks for the following in Word tables:
 
 - if a row has only one text cell, that text is applied to all weeks.
 
-Weeks are sorted according to the number after the dot.
+Weeks are sorted according to the number after the dot (`SETT 1.2` → 2). If the same number appears more than once (for example two tables with `SETT 1.1–1.4` and `SETT 2.1–2.4`), the number before the dot is used first, so the blocks stay in order.
 
 ### Automatic exercise classification
 
@@ -128,7 +136,7 @@ If the file is invalid, an error appears (“No table with weeks found”). **PD
 
   If the name is similar (80% or more) **and** at least 70% of the exercises match, it is the same program: the identifier is reused, in-progress logs and history stay linked, and no question is asked. If only one of the two signals matches, the app asks “Update of the same program, or a new program?”. If neither matches, it is a new program.
 
-- When the update keeps the same program, the current week is kept (clamped to the number of weeks in the new file).
+- When the update keeps the same program, the current week is kept (clamped to the number of weeks in the new file), and the edits you made in **Program** are re-applied on top of the new file (see [Program editor](#program-editor)).
 
 - The catalog stores up to 30 programs.
 
@@ -215,6 +223,7 @@ Tap the exercise number or name:
 
 - **Workout finished** is enabled when all exercises are checked; otherwise the button shows “N exercises remaining” and you can use **Mark finished anyway**.
 
+- A workout started before midnight stays open for up to 12 hours, and it is logged with the date and weekday of when it **started**.
 - At the end, the app saves the session into the per-exercise log of every exercise, records the workout in History, updates the Plan and, if all days of the week have been completed, moves to the next week.
 
 ### Exercise history
@@ -352,6 +361,70 @@ The delete icon next to the week name **resets** all workouts for that week, wit
 
 ---
 
+## Program editor
+
+The **Program** tab lets you change the loaded program without going back to the `.docx`. Everything you change goes into a **draft**; the rest of the app keeps using the current program until you press **Apply**.
+
+### Screens (chips at the top)
+
+| Tab | What it shows |
+|-----|---------------|
+| **Giorno** | Week chips, day chips and the exercises of that day as cards: name, prescription (with kg), type badge (**Fondamentale** / **Complementare** / **Riscaldamento**), “same in N weeks” or “different in …”, a dot if it differs from the coach's file, up/down buttons. Estimated session time and warnings at the bottom |
+| **Matrice** | Weeks as columns, exercises as rows (main lifts only, or all). Tap a cell to edit that exact week |
+| **Statistiche** | Sets, tonnage and average intensity per week with a bar chart, plus a preview with different maxes (not saved) |
+| **Strumenti** | Copy, progression generator, deload week, add/remove days and weeks, checks, versions, export, new/duplicate program |
+
+### Editing an exercise
+
+Tap **Modifica** (or a cell of the matrix) to open the edit sheet:
+
+- **Name**, with suggestions from the exercises the app already knows. Flags: Riscaldamento, or the lift it is (Squat / Panca / Stacco / none).
+- **Variant** and **scheme** pickers for main lifts: change the variant (Squat con pause, Panca presa stretta…) or fill the prescription from a scheme (5x5, 3x3, top set RPE + back-off, istintiva…).
+- **Prescription blocks**: each block is *Serie × rip*, *Percentuale*, *RPE*, *Istintiva* or free text; blocks are joined with `+`. A live preview shows how the app reads it (sets, kg from your maxes) and warns when the notation is not understood. You can also edit the raw text. Notation is the same one described in [How the program text is read](#how-the-program-text-is-read): `NxM` is *N sets of M reps*.
+- **Notes**: your note and a coach note, both shown under the exercise during the workout.
+- **Apply to**: only this week, all weeks, from this week on, only the weeks where it is still equal, or the weeks you choose. Only the parts you changed are overwritten, so changing the name does not touch the other weeks' prescriptions. Complementary exercises default to *all weeks*, main lifts to *this week only*.
+- **Other actions** (they follow the chosen scope): move to another day, **temporary substitution** (with the option to share the original exercise's history, and a button to go back), duplicate, delete, and **restore as in the coach's file**.
+
+Every row has a stable id (`sid`), the same in all weeks, so renaming or reordering an exercise keeps its weeks linked.
+
+### Names and history
+
+If you rename an exercise that already has history, the app asks whether it is **the same exercise** (history and “Last time” are kept) or a different one (separate history). Choosing a name the app already knows as a different exercise does not ask anything.
+
+### Draft, apply, versions
+
+- The bar at the top shows **Draft: N changes** with **Apply** and **Discard**. The draft is saved, so it survives closing the app.
+- **Apply** saves the previous version (the last 5 are kept) and refreshes the program. **Annulla ultima applicazione** (or *Versioni* in Strumenti) restores a previous version, and the current one is kept so you can go back.
+- Weeks you have already trained are marked ✓. Editing them asks for confirmation: the program changes, the workout history does not.
+- If a day's exercises change order or number, the in-progress checkmarks of that day are cleared. Logged sets are keyed by exercise, so they are not lost.
+
+### When the coach sends a new file
+
+The program keeps the **original coach's version** (`base`) next to your edits. If you load a new `.docx` that the app recognizes as the same program:
+
+1. your local edits (changed fields, added/deleted exercises, your order, weeks you added) are re-applied on top of the new file;
+2. if the coach changed the same row you changed, the app asks once: keep your version for the conflicts, or use the coach's (your other edits stay);
+3. the previous version is saved ("Prima del reimport del file") and a summary tells you how many edits were re-applied and how many could not be (for example because the coach renamed or removed the row);
+4. a pending draft must be applied or discarded first (the app asks).
+
+### Tools
+
+- **Copy**: a day or a whole week onto another week, or into a new week at the end.
+- **Progression generator**: pick a main lift, a range of weeks, starting %, + % per week, sets and reps.
+- **Deload week**: lowers percentages and sets of a week; rows with notation that is not simple are left untouched and counted.
+- **Days and weeks**: add a day, delete a day or a week.
+- **Checks**: duplicate exercise in a day, empty prescription, unrecognized notation, days with a different number of exercises across weeks.
+- **Export .docx**: writes the current program in the same table format the app reads (rows identical in all weeks become a single cell), useful to send it to the coach. A single-week program cannot be re-read by the importer, which needs at least two week columns.
+- **New empty program** (name, weeks, days), **duplicate program**, **rename**, and **restore everything as in the coach's file** (as a draft).
+
+### Limits
+
+- Reordering uses the up/down buttons (there is no drag and drop). By default the order changes in all weeks; untick *Riordina in tutte le settimane* to change only the current one.
+- The estimated duration uses each exercise's rest time plus about 45 seconds per set.
+- Statistics count only percentage-based main lifts for tonnage, and need a recognizable number of sets.
+
+---
+
 ## History, CSV export and import
 
 ### List
@@ -368,9 +441,11 @@ The delete icon next to the week name **resets** all workouts for that week, wit
 
 ### Export CSV
 
-The export button downloads `workout-history-YYYY-MM-DD.csv` with one row per set and the columns:
+The export button downloads `storico-allenamenti-YYYY-MM-DD.csv` with one row per set and the columns:
 
-`workout_id, date, at, prog_id, prog_name, week, day, title, exercise, warm, main, exercise_done, set_n, kg, reps, set_done`
+`workout_id, date, at, prog_id, prog_name, week, day, title, exercise, warm, main, exercise_done, set_n, kg, reps, set_done, kg_l, reps_l, kg_r, reps_r`
+
+For **unilateral** sets, `kg` and `reps` are empty and the left/right values are in `kg_l`, `reps_l`, `kg_r`, `reps_r`; the import restores both sides. CSV files exported by older versions (without these four columns) can still be imported.
 
 ### Import CSV
 
@@ -431,6 +506,7 @@ Everything stays in the browser/PWA `localStorage`, under the key `powerapp_v1`:
 - Mon-Sun register for each week;
 
 - workout history, program catalog, per-exercise log (`exLog`), exercise names and aliases (`exReg`, `exAlias`);
+- the program with its coach's original (`prog.base`), the last 5 versions (`prog.versions`) and the unapplied draft (`progDraft`); every exercise carries a stable row id (`sid`);
 
 - rest seconds per exercise, workout time, notification state;
 
@@ -442,7 +518,11 @@ Storage limits: 30 programs in the catalog, approximately 100-200 workouts in hi
 
 ### Backup
 
-**Plan > Download data backup (.json)** saves the whole app state in one file (`powerlifting-backup-YYYY-MM-DD.json`). On iPhone, downloads from the installed app may not work; if so, use the CSV export from History. The JSON file is not re-importable from the interface (it is a safety copy you can restore manually through the browser console).
+**Plan > Download data backup (.json)** saves the whole app state in one file (`powerlifting-backup-YYYY-MM-DD.json`). On iPhone, downloads from the installed app may not work; if so, use the CSV export from History.
+
+**Plan > Restore backup (.json)** loads a backup file: it asks for confirmation, then asks whether to download a backup of the current data first, replaces **all** current data and reloads the app. A file that is not a backup of this app is rejected without changing anything. Backups made before the per-exercise log existed are migrated automatically on reload (see below). Open-popup state (day prompt, rest picker, accessories draft, plan popup) is not restored.
+
+On startup the app also discards the purely visual popups (day prompt, day editor, rest picker); the accessories draft and the plan popup are kept because they hold data you typed.
 
 ### Data migration (schema v2)
 
@@ -567,6 +647,9 @@ The `tests/` folder (Node 18+, uses jsdom, no browser needed) contains:
 | File | Purpose |
 |------|---------|
 | `test-unit-migrazione.js` | Migration of old data, exercise recognition, unilateral/bilateral conversion, double save, program switching with identical week names, program recognition |
+| `test-bugfix.js` | Regression tests for bugs found in review: names with apostrophes/quotes in the rest-timer buttons, new program with the same file name not inheriting completed days, unilateral sets in the CSV round-trip, expired rest timer on app open, `window.focus` not overwritten |
+| `test-extra.js` | Shared rest-timer tick, week ordering with repeated numbers, workout crossing midnight (kept open and logged with the start date), popups not restored on startup, backup restore (valid, cancelled, invalid and broken files) |
+| `test-programma.js` | Program editor: ids, scopes, blocks, draft/apply/versions, reorder, add/delete/move, substitution, history on rename, locked weeks, statistics and checks, tools, notes, re-import merge with conflicts, `.docx` export round-trip, new/duplicate program |
 | `test-e2e-ui.js` | Imports a real `.docx`, logs a workout, switches program, checks the rendered “Last time” line and prefill, and smoke-tests the Plan popup and History |
 | `schede-esempio/*.docx` | Sample programs: base, same file re-downloaded `(1)`, similar program with a different file name (triggers the question), completely different program |
 | `stato-vecchio.json` | App state in the old format, to try the migration (`localStorage.setItem('powerapp_v1', '<file contents>')` before updating) |
@@ -578,7 +661,7 @@ npm install
 npm test            # APP_DIR=/path/to/app npm test if the tests are not inside the app folder
 ```
 
-Expected output: `passati 45 falliti 0`, then `passati 11 falliti 0` and `smoke passati 13 falliti 0`. See `tests/README-TEST.md` for the manual test steps on the phone.
+Expected output: `passati 45 falliti 0`, then `passati 11 falliti 0` and `smoke passati 13 falliti 0`, then `bugfix passati 20 falliti 0`, `extra passati 22 falliti 0` and `programma passati 108 falliti 0`. See `tests/README-TEST.md` for the manual test steps on the phone.
 
 ---
 
@@ -595,6 +678,10 @@ Expected output: `passati 45 falliti 0`, then `passati 11 falliti 0` and `smoke 
 | iPhone notifications | App added to Home Screen and opened from the icon |
 | Cron does not run | `CRON_SECRET`, Redis, Vercel Functions logs |
 | Timer cannot be heard | Vibration is only supported on some devices; keep the screen active and volume turned up |
+| The rest timer does not beep after reopening the app | By design: if the timer expired more than 2 minutes ago, it is silently discarded instead of ringing late |
+| I edited the program but Today still shows the old one | Changes stay in a **draft** until you press **Apply** in the Program tab |
+| After loading the coach's new file my edits are gone | They are re-applied only if the file is recognized as the same program; otherwise it is a new program. Use **Versioni** (Program > Strumenti) to go back to the version saved before the import |
+| The export `.docx` cannot be read back | The importer needs at least two week columns (`SETT x.y`) |
 | Plan dots are “wrong” | Plan follows History: check the entries or re-import the CSV |
 | The app asks “Is it the same exercise as …?” | Normal for names that are only moderately similar; the answer is remembered. To fix a wrong answer, use `mergeExercises(fromId, toId)` from the console |
 | The app asks “Update of the same program or a new one?” | The file name and the exercises only partly match a known program. OK = same program (logs kept), Cancel = new program |
