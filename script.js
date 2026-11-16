@@ -267,7 +267,7 @@ function addRestToStorico(week, wd) {
     progFileName: S.prog ? displayProgFileName(S.prog) : null,
     exercises: []
   });
-  if (S.workoutLog.length > 200) S.workoutLog.length = 200;
+  // Keep the complete workout history.
 }
 /** Segna allenamento (anche da Piano senza sessione completa) */
 function addTrainMarkToStorico(week, wd, dayNum) {
@@ -293,7 +293,7 @@ function addTrainMarkToStorico(week, wd, dayNum) {
     exercises: [],
     fromPiano: true
   });
-  if (S.workoutLog.length > 200) S.workoutLog.length = 200;
+  // Keep the complete workout history.
 }
 const clearCal = (weekLabel, wd = weekdayMon0()) => {
   // elimina dallo storico tutto ciò che era su questo weekday, poi il piano si ricostruisce
@@ -374,10 +374,7 @@ function pianoSaveEmpty() {
   addTrainMarkToStorico(week, wd, dayNum);
   rebuildPianoFromStorico();
   const wObj = S.prog && S.prog.weeks.find(x => x.label === week);
-  if (dayNum !== 'comp' && wObj && !remaining(wObj).length) {
-    const idx = S.prog.weeks.findIndex(x => x.label === week);
-    if (idx >= 0 && idx < S.prog.weeks.length - 1 && S.wi === idx) S.wi = idx + 1;
-  }
+  if (dayNum !== 'comp' && wObj && !remaining(wObj).length) advanceCompletedWeek(week);
   if (wd === weekdayMon0() && week === (W() && W().label)) {
     S.today = { date: dstr(), type: 'rest', finished: 1, week, day: dayNum };
   }
@@ -393,7 +390,9 @@ function pianoSaveWithLoads() {
     pianoSaveEmpty();
     return;
   }
+  S.pianoPreviousToday = S.today ? JSON.parse(JSON.stringify(S.today)) : null;
   S.pianoSession = { week, wd, day: dayNum };
+  cancelRestTimer();
   S.dayEdit = null;
   // contesto sessione per tg / set log
   S.today = { date: dstr(), type: 'train', day: dayNum, week, fromPiano: true, startedAt: Date.now() };
@@ -402,7 +401,8 @@ function pianoSaveWithLoads() {
 }
 function cancelPianoSession() {
   S.pianoSession = null;
-  if (S.today && S.today.fromPiano) S.today = { date: dstr(), type: 'ask' };
+  if (S.today && S.today.fromPiano) S.today = S.pianoPreviousToday || { date: dstr(), type: 'ask' };
+  delete S.pianoPreviousToday;
   save();
   render();
 }
@@ -429,7 +429,9 @@ function savePianoSession() {
   }
   rebuildPianoFromStorico();
   S.pianoSession = null;
-  S.today = { date: dstr(), type: 'rest', finished: 1, week: ps.week, day: d };
+  advanceCompletedWeek(ps.week);
+  S.today = S.pianoPreviousToday || { date: dstr(), type: 'rest', finished: 1, week: ps.week, day: d };
+  delete S.pianoPreviousToday;
   save();
   render();
 }
@@ -691,7 +693,7 @@ function compModalHtml() {
       <div class="comp-next-wrap">
         <label class="comp-inc-label ${nextChecked ? 'active' : ''}">
           <input type="checkbox" data-c="incNext" ${nextChecked} onchange="compToggleNext(${i}, this)">
-          <span>Aumentare carico la prossima volta?</span>
+          <span>Modificare il carico la prossima volta?</span>
         </label>
         <div class="comp-next-inputs ${nextHidden}" id="comp-next-inputs-${i}">
           <input type="number" step="0.5" inputmode="decimal" data-c="nextKg" placeholder="Nuovo kg (es. 25)" value="${esc(String(r.nextKg != null ? r.nextKg : ''))}">
@@ -914,12 +916,12 @@ function exCleanSets(sets) {
     if (s.L || s.R) {
       const side = sd => sd ? { kg: exNum(sd.kg), reps: exInt(sd.reps) } : { kg: null, reps: null };
       const L = side(s.L), R = side(s.R);
-      if (L.kg == null && L.reps == null && R.kg == null && R.reps == null) return;
-      out.push({ L, R });
+      if (L.kg == null && L.reps == null && R.kg == null && R.reps == null && s.n == null && s.blockIdx == null) return;
+      out.push({ L: { ...L, done: !!(s.L && s.L.done) }, R: { ...R, done: !!(s.R && s.R.done) }, ...setHistoryMeta(s) });
     } else {
       const kg = exNum(s.kg), reps = exInt(s.reps);
-      if (kg == null && reps == null) return;
-      const o = { kg, reps };
+      if (kg == null && reps == null && s.n == null && s.blockIdx == null) return;
+      const o = { kg, reps, ...setHistoryMeta(s) };
       const r = rpeOf(s);
       if (r != null) o.rpe = r;
       out.push(o);
@@ -949,17 +951,8 @@ function exConvertSets(sets, mono) {
 }
 /** "3×10 @ 20 kg" (raggruppa serie uguali consecutive); mono: "3× sx 18 kg × 10 / dx 20 kg × 10" */
 function exFmtSets(sets) {
-  const side = x => (x && x.kg != null ? exFmtNum(x.kg) + ' kg' : '—') + ' × ' + (x && x.reps != null ? x.reps : '—');
-  const groups = [];
-  (sets || []).forEach(s => {
-    const mono = !!(s.L || s.R);
-    const txt = mono
-      ? 'sx ' + side(s.L) + ' / dx ' + side(s.R)
-      : (s.reps != null ? s.reps : '—') + (s.kg != null ? ' @ ' + exFmtNum(s.kg) + ' kg' : '');
-    const last = groups[groups.length - 1];
-    if (last && last.txt === txt) last.n++; else groups.push({ txt, n: 1, mono });
-  });
-  return groups.map(g => g.n + (g.mono ? '× ' : '×') + g.txt).join(' + ');
+  const fmt = s => (s && s.kg != null ? exFmtNum(s.kg) + ' kg' : '— kg') + ' × ' + (s && s.reps != null ? s.reps : '—');
+  return (sets || []).map((s, i) => (s.blockIdx != null ? 'B' + (s.blockIdx + 1) + ' · ' : '') + 'S' + (s.blockSet || s.n || i + 1) + ': ' + (s.L || s.R ? 'Sx ' + fmt(s.L) + ' / Dx ' + fmt(s.R) : fmt(s))).join(' · ');
 }
 
 /* ----- sessioni ed entries ----- */
@@ -1022,7 +1015,7 @@ function exIngestWorkout(w) {
     if (!id) return;
     const en = { date: w.date || dstr(), progId: w.progId || '', week: w.week || '', day: w.day, sets };
     if (e.note) en.note = e.note;
-    if (e.nextKg != null) { en.nextKg = e.nextKg; en.nextNote = e.nextNote || ''; }
+    if (e.nextKg != null) { en.nextKg = e.nextKg; en.nextNote = e.nextNote || ''; if(e.nextSides)en.nextSides=e.nextSides; }
     exUpsertEntry(id, e.name, en, { keepExisting: true });
   });
 }
@@ -1092,44 +1085,41 @@ function matchKnownProg(prog) {
 const newProgId = () => 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
 /* ----- backup e salvataggio ----- */
-function exportBackupJson() {
+async function exportBackupJson() {
   try {
-    const blob = new Blob([JSON.stringify(S)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'powerlifting-backup-' + dstr() + '.json';
-    document.body.appendChild(a); a.click();
-    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
-  } catch (e) { alert('Backup non riuscito: ' + (e && e.message ? e.message : e)); }
+    const snapshot=JSON.parse(JSON.stringify(S));
+    const refs=Object.values(snapshot.noteImages || {}).flat();
+    const media=[];
+    for (const id of [...new Set(refs.map(r=>r.id))]) { const rec=await mediaGet(id); if (!rec) throw new Error('Manca una foto: '+id); media.push(rec); }
+    snapshot._media=media; snapshot.backupVersion=3;
+    downloadData(JSON.stringify(snapshot),'application/json','powerlifting-backup-'+dstr()+'.json');
+  } catch(e) { alert('Backup non riuscito: '+e.message); }
 }
 
 function reloadApp() { location.reload(); }
 /** Ripristina un backup .json scaricato con exportBackupJson(); sostituisce tutti i dati e ricarica l'app */
-function importBackupJson(input) {
-  const file = input && input.files && input.files[0];
-  if (!file) return;
-  const fr = new FileReader();
-  fr.onload = () => {
-    try {
-      const data = JSON.parse(fr.result);
-      if (!data || typeof data !== 'object' || Array.isArray(data) || !(data.prog || Array.isArray(data.workoutLog) || data.exLog)) {
-        throw new Error('Il file non sembra un backup di questa app.');
-      }
-      const n = Array.isArray(data.workoutLog) ? data.workoutLog.length : 0;
-      const info = (data.prog && data.prog.name ? data.prog.name + ' - ' : '') + n + ' allenamenti nello storico';
-      if (!confirm('Ripristinare questo backup?\n\n' + info + '\n\nTutti i dati attuali verranno SOSTITUITI.')) { input.value = ''; return; }
-      if (confirm('Vuoi scaricare prima un backup dei dati attuali?\n\nOK = scarica, Annulla = continua senza')) exportBackupJson();
-      data.dayModal = null; data.dayEdit = null; data.restPicker = null; data.compModal = null; data.pianoSession = null;
-      S = data;
-      localStorage.setItem(KEY, JSON.stringify(S));
-      reloadApp();
-    } catch (e) {
-      alert('Ripristino non riuscito: ' + (e && e.message ? e.message : e));
+async function importBackupJson(input) {
+  const file=input && input.files && input.files[0]; if (!file) return;
+  try {
+    const data=JSON.parse(await file.text());
+    if (!data || Array.isArray(data) || typeof data!=='object' || !(data.prog || Array.isArray(data.workoutLog) || data.exLog)) throw new Error('File di backup non valido');
+    if (!confirm('Ripristinare il backup e sostituire i dati attuali?')) return;
+    const old=localStorage.getItem(KEY);
+    const media=data._media || []; if (!Array.isArray(media)) throw new Error('Archivio foto non valido');
+    // Use fresh image identifiers: a failed restore cannot overwrite the current photos.
+    const ids=new Map();
+    for (const rec of media) {
+      if (!rec || typeof rec.id!=='string' || typeof rec.data!=='string' || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(rec.data)) throw new Error('Foto del backup non valida');
+      const id='restore_'+Date.now().toString(36)+Math.random().toString(36).slice(2); ids.set(rec.id,id);
+      await mediaPut({...rec,id});
     }
-    input.value = '';
-  };
-  fr.onerror = () => alert('Impossibile leggere il file.');
-  fr.readAsText(file, 'UTF-8');
+    Object.values(data.noteImages || {}).forEach(refs=>refs.forEach(ref=>{ if (ids.has(ref.id)) ref.id=ids.get(ref.id); }));
+    delete data._media;
+    data.dayModal=null; data.dayEdit=null; data.restPicker=null; data.compModal=null; data.pianoSession=null;
+    try { localStorage.setItem(KEY,JSON.stringify(data)); } catch(e) { if (old!=null) localStorage.setItem(KEY,old); throw e; }
+    cancelRestTimer(); localStorage.setItem(KEY,JSON.stringify(data)); reloadApp();
+  } catch(e) { alert('Ripristino non riuscito: '+e.message); }
+  finally { input.value=''; }
 }
 
 /* ----- migrazione a schemaV 2 (idempotente) ----- */
@@ -1532,36 +1522,40 @@ function parseComplexSets(text, lift) {
     if (T.dynamic) hasDynamic = true;
   });
 
+  let sourceTop = false;
+  configs.forEach(c => {
+    if (c.T && c.T.topset && !c.T.backoff) { c.role='top'; sourceTop=true; }
+    if ((sourceTop || configs.some(x => x.role === 'top')) && c.T && c.T.backoff && c.T.backoffPct != null && c.role !== 'top') {
+      c.role='backoff'; c.kgLocked=true; c.dynamic=false; c.mode='fixed';
+    }
+  });
   return { configs, hasDynamic };
 }
 
 /** kg del set MAV (prima serie con ruolo mav o prima con kg > 0 del blocco mav) */
-function getMavKgFromLog(log, configs) {
+function getMavKgFromLog(log, configs, beforeIndex) {
   if (!log || !log.sets) return null;
+  let sourceBlock = null;
+  const end = beforeIndex == null ? configs.length : beforeIndex;
+  for (let i = end - 1; i >= 0; i--) {
+    if (configs[i] && configs[i].role === 'mav') { sourceBlock = configs[i].blockIdx; break; }
+  }
+  if (sourceBlock == null) return null;
   let last = null;
-  for (let i = 0; i < log.sets.length; i++) {
-    const cfg = configs && configs[i];
-    const s = log.sets[i];
-    if (cfg && cfg.role === 'mav' && s && s.kg !== '' && s.kg != null) {
-      const v = parseFloat(String(s.kg).replace(',', '.'));
-      if (v > 0) last = v; // ultimo MAV con kg (top della rampa)
-    }
+  for (let i = 0; i < end; i++) {
+    if (!configs[i] || configs[i].blockIdx !== sourceBlock || configs[i].role !== 'mav') continue;
+    const st = log.sets[i];
+    const value = st && exNum(st.kg);
+    if (value > 0 && (st.done || value > 0)) last = value;
   }
-  if (last != null) return last;
-  for (const s of log.sets) {
-    if (s && s.kg !== '' && s.kg != null) {
-      const v = parseFloat(String(s.kg).replace(',', '.'));
-      if (v > 0) return v;
-    }
-  }
-  return null;
+  return last;
 }
 /** Tipologia del blocco (in base alla prima configurazione) */
 function blockKindOf(cfg) {
   if (!cfg) return 'fixed';
   if (cfg.role === 'mav') return 'mav';
   if (cfg.role === 'rpe') return 'rpe';
-  if (cfg.role === 'mavBackoff') return 'pctmav';
+  if (cfg.role === 'mavBackoff' || (cfg.role === 'backoff' && cfg.T && cfg.T.backoffPct != null)) return 'pctmav';
   if (cfg.role === 'inst') return 'inst';
   if (cfg.mode === 'ramp' || cfg.dynamic) return 'ramp';
   if (cfg.T && cfg.T.pct != null) return 'pct';
@@ -1869,19 +1863,24 @@ function getExLog(week, day, i, setCount) {
     row = { sets: [] };
     S.accLog[k][slot] = row;
   }
-  const n = Math.max(1, setCount || row.sets.length || 3);
+  const ex = sessionExercise(week, day, i);
+  const fallback = ex ? parseComplexSets(ex.text, blockExLift(ex)).configs.length : 1;
+  const n = Math.max(1, setCount || row.sets.length || fallback);
   while (row.sets.length < n) row.sets.push({ kg: '', reps: '', done: false });
-  if (row.sets.length > n && !row.dyn) row.sets.length = n;
+  // Reading a log must never truncate saved future sets.
   row.sets.forEach(s => { if (s.done == null) s.done = false; });
   return row;
 }
 function setExSetLog(week, day, i, setIdx, field, value, skipSave) {
-  const row = getExLog(week, day, i);
-  if (!row.sets[setIdx]) row.sets[setIdx] = { kg: '', reps: '', done: false };
-  // non modificare kg/rip se la serie è già fatta
-  if (row.sets[setIdx].done && (field === 'kg' || field === 'reps')) return;
-  // salva SOLO il campo corrente (niente cascade qui → altrimenti su mobile resta solo la 1ª cifra)
-  row.sets[setIdx][field] = value;
+  const x = exerciseConfig(week, day, i);
+  if (!x || !['kg', 'reps', 'rpe'].includes(field)) return;
+  const st = x.row.sets[setIdx], c = x.configs[setIdx];
+  if (!st || st.done || lockedField(x.e, c, field)) return;
+  st[field] = value;
+  st[field + 'Source'] = 'manual';
+  if (field === 'kg') cascadeKgFromSet(week, day, i, setIdx);
+  resolveCalculatedSets(week, day, i);
+  refreshSetValues(week, day, i);
   if (!skipSave) save();
 }
 /** Propaga i kg alle serie successive vuote — chiamare solo su blur/change, non su ogni tasto */
@@ -1900,36 +1899,17 @@ function blockEndForSet(week, day, i, setIdx, row) {
   } catch (err) { return row.sets.length; }
 }
 function cascadeKgFromSet(week, day, i, setIdx) {
-  const row = getExLog(week, day, i);
-  if (!row.sets[setIdx]) return;
-  const value = row.sets[setIdx].kg;
-  if (value === '' || value == null) return;
-  const active = document.activeElement;
-  let dirty = false;
-  const bEnd = blockEndForSet(week, day, i, setIdx, row);
-  for (let j = setIdx + 1; j < bEnd; j++) {
-    if (row.sets[j].done) continue;
-    if (row.sets[j].kg !== '' && row.sets[j].kg != null) continue;
-    row.sets[j].kg = value;
-    dirty = true;
+  const x = exerciseConfig(week, day, i);
+  if (!x || !x.configs[setIdx]) return;
+  const value = x.row.sets[setIdx].kg;
+  for (let j = setIdx + 1; j < x.configs.length && x.configs[j].blockIdx === x.configs[setIdx].blockIdx; j++) {
+    const st = x.row.sets[j];
+    if (st.done || lockedField(x.e, x.configs[j], 'kg')) continue;
+    // Existing unknown values are conservatively treated as manual after upgrade.
+    if (st.kgSource === 'manual' || (!st.kgSource && st.kg !== '' && st.kg != null)) break;
+    st.kg = value; st.kgSource = 'inherited';
   }
-  if (dirty) save();
-  // aggiorna solo i campi DOM non attivi
-  try {
-    document.querySelectorAll('.set-card').forEach(c => {
-      if (c.getAttribute('data-week') !== String(week)) return;
-      if (Number(c.getAttribute('data-day')) !== Number(day)) return;
-      if (Number(c.getAttribute('data-exi')) !== Number(i)) return;
-      const seti = Number(c.getAttribute('data-set'));
-      if (seti <= setIdx || seti >= bEnd) return;
-      if (row.sets[seti] && row.sets[seti].done) return;
-      const inp = c.querySelector('input');
-      if (inp && inp !== active && (inp.value === '' || inp.value == null)) {
-        inp.value = value;
-        inp.classList.add('kg-suggested');
-      }
-    });
-  } catch (e) { }
+  refreshSetValues(week, day, i); save();
 }
 function prevSetKg(log, setIdx) {
   if (!log || !log.sets) return '';
@@ -1951,94 +1931,36 @@ function prevSetSideKg(log, setIdx, side) {
   return '';
 }
 function cascadeMonoKgFromSet(week, day, i, setIdx, side) {
-  const row = getExLog(week, day, i);
-  if (!row.sets[setIdx]) return;
-  ensureMonoSides(row.sets[setIdx]);
-  const value = (side === 'R' ? row.sets[setIdx].R : row.sets[setIdx].L).kg;
-  if (value === '' || value == null) return;
-  const active = document.activeElement;
-  let dirty = false;
-  for (let j = setIdx + 1; j < row.sets.length; j++) {
-    ensureMonoSides(row.sets[j]);
-    const sd = side === 'R' ? row.sets[j].R : row.sets[j].L;
-    if (sd.done) continue;
-    if (sd.kg !== '' && sd.kg != null) continue;
-    sd.kg = value;
-    dirty = true;
+  const x = exerciseConfig(week, day, i);
+  if (!x || !x.configs[setIdx]) return;
+  ensureMonoSides(x.row.sets[setIdx]);
+  const value = x.row.sets[setIdx][side].kg;
+  for (let j = setIdx + 1; j < x.configs.length && x.configs[j].blockIdx === x.configs[setIdx].blockIdx; j++) {
+    const st = ensureMonoSides(x.row.sets[j])[side];
+    if (st.done || lockedField(x.e, x.configs[j], 'kg')) continue;
+    if (st.kgSource === 'manual' || (!st.kgSource && st.kg !== '' && st.kg != null)) break;
+    st.kg = value; st.kgSource = 'inherited';
   }
-  const other = side === 'R' ? row.sets[setIdx].L : row.sets[setIdx].R;
-  if (!other.done && (other.kg === '' || other.kg == null)) {
-    other.kg = value;
-    dirty = true;
-  }
-  if (dirty) save();
-  try {
-    document.querySelectorAll('.set-card').forEach(c => {
-      if (c.getAttribute('data-week') !== String(week)) return;
-      if (Number(c.getAttribute('data-day')) !== Number(day)) return;
-      if (Number(c.getAttribute('data-exi')) !== Number(i)) return;
-      const seti = Number(c.getAttribute('data-set'));
-      if (seti < setIdx) return;
-      c.querySelectorAll('.mono-side').forEach(sideEl => {
-        const sKey = sideEl.getAttribute('data-side');
-        if (seti === setIdx && sKey === side) return;
-        const sd = row.sets[seti] && (sKey === 'R' ? row.sets[seti].R : row.sets[seti].L);
-        if (!sd || sd.done) return;
-        const inp = sideEl.querySelector('input');
-        if (inp && inp !== active && (inp.value === '' || inp.value == null) && sd.kg !== '' && sd.kg != null) {
-          inp.value = sd.kg;
-          inp.classList.add('kg-suggested');
-        }
-      });
-    });
-  } catch (e) { }
+  refreshSetValues(week, day, i); save();
 }
 /** Salva kg/rip dai campi input PRIMA di un re-render (altrimenti si perdono) */
 function flushSetInputsFromDOM() {
-  let dirty = false;
-  document.querySelectorAll('.set-card').forEach(card => {
-    const week = card.getAttribute('data-week');
-    const day = Number(card.getAttribute('data-day'));
-    const exi = Number(card.getAttribute('data-exi'));
-    const seti = Number(card.getAttribute('data-set'));
-    if (week == null || Number.isNaN(exi) || Number.isNaN(seti)) return;
-    const row = getExLog(week, day, exi);
-    if (!row.sets[seti]) row.sets[seti] = { kg: '', reps: '', done: false };
-
-    // monolaterale: input dentro .mono-side
-    const monoSides = card.querySelectorAll('.mono-side');
-    if (monoSides.length) {
-      ensureMonoSides(row.sets[seti]);
-      monoSides.forEach(sideEl => {
-        const side = sideEl.getAttribute('data-side');
-        if (!side || sideEl.classList.contains('mono-side-done')) return;
-        const sideObj = side === 'R' ? row.sets[seti].R : row.sets[seti].L;
-        const inputs = sideEl.querySelectorAll('input');
-        if (inputs[0] && sideObj.kg !== inputs[0].value) { sideObj.kg = inputs[0].value; dirty = true; }
-        if (inputs[1] && sideObj.reps !== inputs[1].value) { sideObj.reps = inputs[1].value; dirty = true; }
-      });
-      ensureMonoSides(row.sets[seti]);
-      return;
-    }
-
-    if (row.sets[seti].done) return;
-    const inputs = card.querySelectorAll('input[type="number"], input:not([type])');
-    let n = 0;
-    inputs.forEach(inp => {
-      const val = inp.value;
-      if (n === 0) {
-        if (row.sets[seti].kg !== val) { row.sets[seti].kg = val; dirty = true; }
-      } else if (n === 1) {
-        if (row.sets[seti].reps !== val) { row.sets[seti].reps = val; dirty = true; }
-      } else if (n === 2) {
-        if (row.sets[seti].rpe !== val) { row.sets[seti].rpe = val; dirty = true; }
-      }
-      n++;
-    });
+  // oninput is authoritative. Read only named fields; never infer field by position.
+  document.querySelectorAll('.set-card input[data-field]').forEach(inp => {
+    if (inp.disabled || inp.readOnly) return;
+    const card = inp.closest('.set-card'), sd = inp.closest('.mono-side');
+    const week = card.dataset.week, day = Number(card.dataset.day), i = Number(card.dataset.exi), si = Number(card.dataset.set);
+    const x = exerciseConfig(week, day, i);
+    if (!x || !x.row.sets[si]) return;
+    const st = sd ? ensureMonoSides(x.row.sets[si])[sd.dataset.side] : x.row.sets[si];
+    if ((st.done && !isPastEntry()) || st[inp.dataset.field] === inp.value) return;
+    if (sd) setExSideLog(week, day, i, si, sd.dataset.side, inp.dataset.field, inp.value);
+    else setExSetLog(week, day, i, si, inp.dataset.field, inp.value);
   });
-  if (dirty) save();
+  save();
 }
 function markSetDone(week, day, i, setIdx, done) {
+  _pendingRestOwner = null;
   const row = getExLog(week, day, i);
   if (!row.sets[setIdx]) row.sets[setIdx] = { kg: '', reps: '', done: false };
   row.sets[setIdx].done = done !== false;
@@ -2052,39 +1974,39 @@ function markSetDone(week, day, i, setIdx, done) {
   save();
 }
 function setExSideLog(week, day, i, setIdx, side, field, value) {
-  const row = getExLog(week, day, i);
-  if (!row.sets[setIdx]) row.sets[setIdx] = { kg: '', reps: '', done: false };
-  ensureMonoSides(row.sets[setIdx]);
-  const sideObj = side === 'R' ? row.sets[setIdx].R : row.sets[setIdx].L;
-  if (sideObj.done && (field === 'kg' || field === 'reps')) return;
-  sideObj[field] = value;
+  const x = exerciseConfig(week, day, i);
+  if (!x || !['L', 'R'].includes(side) || !['kg', 'reps'].includes(field)) return;
+  const st = x.row.sets[setIdx], c = x.configs[setIdx];
+  if (!st || lockedField(x.e, c, field)) return;
+  ensureMonoSides(st);
+  if (st[side].done && !isPastEntry()) return;
+  st[side][field] = value;
+  st[side][field + 'Source'] = 'manual';
+  if (field === 'kg') cascadeMonoKgFromSet(week, day, i, setIdx, side);
+  refreshSetValues(week, day, i);
   save();
 }
 /** Segna fatto un lato (L/R) di una serie monolaterale → avvia recupero */
 function markSideDone(week, day, i, setIdx, side, done) {
-  const row = getExLog(week, day, i);
-  if (!row.sets[setIdx]) row.sets[setIdx] = { kg: '', reps: '', done: false };
-  ensureMonoSides(row.sets[setIdx]);
-  const sideObj = side === 'R' ? row.sets[setIdx].R : row.sets[setIdx].L;
-  sideObj.done = done !== false;
-  ensureMonoSides(row.sets[setIdx]); // aggiorna set.done
-  syncExerciseDoneFromSets(week, day, i);
-  save();
+  _pendingRestOwner = null;
+  const x = exerciseConfig(week, day, i); if (!x || !x.row.sets[setIdx]) return;
+  const flag = done !== false;
+  if (flag && !acceptSetSuggestions(week, day, i, setIdx, side)) return;
+  const st = ensureMonoSides(x.row.sets[setIdx]); st[side].done = flag; ensureMonoSides(st);
+  if (flag) { _pendingRestOwner = setOwner(week, day, i, setIdx, side); S.restReminder = null; }
+  else cancelOwnedRest(week, day, i, setIdx, side);
+  syncExerciseDoneFromSets(week, day, i); save();
 }
 /** Allinea S.chk con lo stato delle serie */
 function syncExerciseDoneFromSets(week, day, i) {
-  const wObj = (S.prog && S.prog.weeks.find(x => x.label === week)) || W();
-  if (!wObj) return;
-  const exs = dayExercises(wObj, day);
-  if (!exs || !exs[i] || exs[i].warm) return;
-  const info = parseSets(exs[i].text);
-  const row = getExLog(week, day, i, info.count);
-  const allDone = row.sets.length > 0 && row.sets.every(s => !!s.done);
-  const k = week + '|' + day;
-  S.chk[k] = S.chk[k] || [];
-  const idx = S.chk[k].indexOf(i);
-  if (allDone && idx < 0) S.chk[k].push(i);
-  if (!allDone && idx >= 0) S.chk[k].splice(idx, 1);
+  const x = exerciseConfig(week, day, i); if (!x || x.e.warm) return;
+  const allDone = x.configs.length > 0 && x.configs.every((c, j) => {
+    const st = x.row.sets[j]; return isMonolateral(x.e) ? !!(st && st.L && st.L.done && st.R && st.R.done) : !!(st && st.done);
+  });
+  const a = S.chk[week + '|' + day] = S.chk[week + '|' + day] || [];
+  const idx = a.indexOf(i);
+  if (allDone && idx < 0) a.push(i);
+  if (!allDone && idx >= 0) a.splice(idx, 1);
 }
 /** Etichetta settimana precedente nel programma */
 function prevWeekLabel(currentLabel) {
@@ -2103,7 +2025,7 @@ function findPrevAccessorySets(exerciseName, currentWeek, day, mono) {
     week: en.week || '',
     date: en.date,
     label: exFmtDate(en.date) + (other ? ' · altra scheda' : ''),
-    sets: exConvertSets(en.sets, !!mono),
+    sets: exConvertSets(en.sets.map(st => st.done === false ? {kg:null,reps:null} : st), !!mono),
   };
 }
 /**
@@ -2111,39 +2033,8 @@ function findPrevAccessorySets(exerciseName, currentWeek, day, mono) {
  * dell'ultima volta (anche di un'altra scheda). Mono: sx e dx separati. Non sovrascrive nulla.
  */
 function prefillAccessoryFromPrev(weekLabel, day, exIndex, exercise) {
-  if (!exercise || exercise.warm || isMainLift(exercise)) return null;
-  const mono = isMonolateral(exercise);
-  const planned = getPlannedLoad(exercise.name, weekLabel, day);
-  const prev = findPrevAccessorySets(exercise.name, weekLabel, day, mono);
-  const info = parseSets(exercise.text);
-  const log = getExLog(weekLabel, day, exIndex, info.count);
-  const empty = v => v === '' || v == null;
-  let changed = false;
-  log.sets.forEach((s, si) => {
-    const p = (prev && prev.sets) ? (prev.sets[si] || prev.sets[prev.sets.length - 1]) : null;
-    if (mono) {
-      ensureMonoSides(s);
-      ['L', 'R'].forEach(side => {
-        const sd = s[side];
-        const ps = p && p[side];
-        if (sd.done) return;
-        if (empty(sd.kg)) {
-          if (planned && planned.kg != null) { sd.kg = String(planned.kg); changed = true; }
-          else if (ps && !empty(ps.kg)) { sd.kg = String(ps.kg); changed = true; }
-        }
-        if (empty(sd.reps) && ps && !empty(ps.reps)) { sd.reps = String(ps.reps); changed = true; }
-      });
-      return;
-    }
-    if (empty(s.kg)) {
-      if (planned && planned.kg != null) { s.kg = String(planned.kg); changed = true; }
-      else if (p && !empty(p.kg)) { s.kg = String(p.kg); changed = true; }
-    }
-    if (empty(s.reps) && p && !empty(p.reps)) { s.reps = String(p.reps); changed = true; }
-  });
-  if (changed) save();
-  if (prev) return prev;
-  return planned ? { week: planned.week, label: exFmtDate(planned.date), sets: [{ kg: planned.kg, reps: '' }] } : null;
+  if (!exercise || !isAccessory(exercise)) return null;
+  return findPrevAccessorySets(exercise.name, weekLabel, day, isMonolateral(exercise));
 }
 /** Scrive nel log per esercizio (indipendente dalla scheda). Una entry per scheda+settimana+giorno. */
 function pushLiftHistory(name, sets, week, day, optNextKg, optNextNote, optNote) {
@@ -2152,10 +2043,11 @@ function pushLiftHistory(name, sets, week, day, optNextKg, optNextNote, optNote)
   const id = getExId(name);
   if (!id) return;
   const entry = { date: dstr(), progId: exCurProgId(), week: week || '', day: day, sets: clean };
-  const nk = (optNextKg != null) ? { kg: optNextKg, note: optNextNote || '' } : getNextLoadPlan(name, week, day);
+  const nk = (optNextKg != null) ? { ...(getNextLoadPlan(name, week, day) || {}), kg: optNextKg, note: optNextNote || '' } : getNextLoadPlan(name, week, day);
   if (nk && nk.kg != null) {
     entry.nextKg = nk.kg;
     entry.nextNote = nk.note || '';
+    if (nk.sides) entry.nextSides = nk.sides;
   }
   if (optNote) entry.note = optNote;
   exUpsertEntry(id, name, entry);
@@ -2168,7 +2060,7 @@ function getPlannedLoad(name, currentWeek, currentDay) {
   const cur = exCur(currentWeek, currentDay);
   const en = exEntriesFor(name).find(x => !exSameSession(x, cur));
   if (en && en.nextKg != null) {
-    return { kg: en.nextKg, note: en.nextNote || '', date: en.date, week: en.week, day: en.day };
+    return { kg: en.nextKg, note: en.nextNote || '', sides: en.nextSides || null, date: en.date, week: en.week, day: en.day };
   }
   return null;
 }
@@ -2203,6 +2095,7 @@ function saveSessionLogs(week, day, exercises) {
       else if (/panca|bench/.test(n)) lift = 'b';
       else if (/stacco|deadlift|sumo|regular/.test(n)) lift = 'd';
     }
+    resolveCalculatedSets(week, day, i);
     const complex = parseComplexSets(e.text, lift);
     const log = getExLog(week, day, i, complex.configs.length);
     const effC = buildEffectiveConfigs(complex, log);
@@ -2212,16 +2105,17 @@ function saveSessionLogs(week, day, exercises) {
     const nextNote = nextPlan && nextPlan.note || '';
 
     if (isMainLift(e)) {
-      const sets = log.sets.map((s, si) => {
+      const sets = log.sets.slice(0,effC.length).map((s, si) => {
         const c = effC[si] || effC[effC.length - 1] || {};
         const mode = c.mode || 'fixed';
-        const prescKg = c.kg;
+        const prescKg = s.kgSource === 'calculated' ? exNum(s.kg) : c.kg;
         const prescRep = c.reps;
         const autoM = mode !== 'fixed';
 
         return {
           kg: (autoM && s.kg !== '' && s.kg != null) ? parseFloat(String(s.kg).replace(',', '.')) || prescKg : (prescKg != null ? prescKg : parseFloat(String(s.kg).replace(',', '.'))),
           reps: (autoM && s.reps !== '' && s.reps != null) ? parseInt(s.reps, 10) || prescRep : (prescRep != null ? prescRep : parseInt(s.reps, 10)),
+          ...setHistoryMeta(s),
           done: s.done,
         };
       });
@@ -2234,12 +2128,44 @@ function saveSessionLogs(week, day, exercises) {
 }
 /* ===== Note per esercizi e pianificazione carico prossima sessione ===== */
 function getExNoteKey(week, day, i) { return exCurProgId() + '|' + week + '|' + day + '|' + accSlot(week, day, i); }
+/** Esercizio segnato come completato nella sessione (stessa chiave usata da tg()). */
+function isExerciseCompleted(week, day, i) {
+  const a = S.chk && S.chk[week + '|' + day];
+  return !!(a && a.includes(i));
+}
+/** Note bloccate: esercizio finito (non negli inserimenti di allenamenti passati, dove non si può togliere il completamento). */
+function isExNoteLocked(week, day, i) {
+  return !isPastEntry() && isExerciseCompleted(week, day, i);
+}
+/** Note salvate l'ultima volta per lo stesso esercizio (qualsiasi scheda), esclusa la sessione corrente. */
+function inheritedExNote(week, day, i) {
+  const e = sessionExercise(week, day, i);
+  if (!e || e.warm || !e.name) return '';
+  const prev = lastExEntry(e.name, week, day);
+  return (prev && prev.note) || '';
+}
 function getExNote(week, day, i) {
-  return (S.exNotes && S.exNotes[getExNoteKey(week, day, i)]) || '';
+  const key = getExNoteKey(week, day, i);
+  if (S.exNotes && Object.prototype.hasOwnProperty.call(S.exNotes, key)) return S.exNotes[key] || '';
+  // Prima apertura in questa sessione: parte dalle note dell'ultima volta, ma come COPIA propria della sessione.
+  if (isPastEntry()) return '';
+  const inherited = inheritedExNote(week, day, i);
+  if (inherited) { S.exNotes = S.exNotes || {}; S.exNotes[key] = inherited; }
+  return inherited;
 }
 function setExNote(week, day, i, text) {
-  S.exNotes = S.exNotes || {};
+  if (isExNoteLocked(week, day, i)) return;
   S.exNotes[getExNoteKey(week, day, i)] = String(text || '');
+  const e = sessionExercise(week, day, i);
+  if (e) {
+    const slot = accSlot(week, day, i);
+    (S.workoutLog || []).filter(w => w.progId === exCurProgId() && w.week === week && String(w.day) === String(day)).forEach(w => {
+      const matches = (w.exercises || []).filter(ex => getExId(ex.name) === getExId(e.name));
+      const ordinal = Number((slot.match(/#(\d+)$/) || [])[1] || 0);
+      if (matches[ordinal]) matches[ordinal].note = String(text || '');
+    });
+    exEntriesFor(e.name).filter(en => exSameSession(en, exCur(week, day))).forEach(en => en.note = String(text || ''));
+  }
   save();
 }
 function getNextLoadKey(exerciseName, week, day) {
@@ -2250,15 +2176,21 @@ function getNextLoadPlan(exerciseName, week, day) {
   if (!S.nextLoad || week == null || day == null) return null;
   return S.nextLoad[getNextLoadKey(exerciseName, week, day)] || null;
 }
-function setNextLoadPlan(exerciseName, increase, kg, note, week, day) {
+function setNextLoadPlan(exerciseName, increase, kg, note, week, day, sides) {
   if (week == null || day == null) return;
   S.nextLoad = S.nextLoad || {};
   const key = getNextLoadKey(exerciseName, week, day);
   if (!increase) {
     delete S.nextLoad[key];
   } else {
-    S.nextLoad[key] = { kg: parseFloat(String(kg || 0).replace(',', '.')) || null, note: note || '' };
+    const prior=S.nextLoad[key] || {};
+    const resolvedSides=sides || prior.sides || null;
+    const values=resolvedSides ? Object.values(resolvedSides).map(x=>exNum(x.kg)).filter(x=>x!=null) : [];
+    S.nextLoad[key] = { kg: exNum(kg) != null ? exNum(kg) : (values.length ? Math.min(...values) : null), note: note || '', sides: resolvedSides };
   }
+  const plan=S.nextLoad[key];
+  exEntriesFor(exerciseName).filter(en=>exSameSession(en,exCur(week,day))).forEach(en=>{en.nextKg=plan ? plan.kg : null;en.nextNote=plan ? plan.note : '';en.nextSides=plan ? plan.sides : null;});
+  (S.workoutLog || []).filter(w=>w.progId===exCurProgId() && w.week===week && String(w.day)===String(day)).forEach(w=>(w.exercises || []).filter(e=>getExId(e.name)===getExId(exerciseName)).forEach(e=>{e.nextKg=plan ? plan.kg : null;e.nextNote=plan ? plan.note : '';e.nextSides=plan ? plan.sides : null;}));
   save();
 }
 function onToggleNextLoad(checkbox) {
@@ -2299,23 +2231,20 @@ function onNextLoadInputsChange(input) {
   const noteInp = form.querySelector('.next-load-note-input');
   const kg = kgInp ? kgInp.value : '';
   const note = noteInp ? noteInp.value : '';
-  setNextLoadPlan(exName, true, kg, note, week, day);
+  const sideInputs=[...form.querySelectorAll('[data-next-side]')];
+  const sides=sideInputs.length ? Object.fromEntries(sideInputs.map(inp=>[inp.dataset.nextSide,{kg:exNum(inp.value)}])) : null;
+  setNextLoadPlan(exName, true, kg, note, week, day, sides);
 }
 
 function applyPlannedLoadToSets(weekLabel, day, exIndex, kg) {
-  const log = getExLog(weekLabel, day, exIndex);
-  if (!log || !log.sets) return;
-  log.sets.forEach(s => {
-    if (s.L || s.R) {
-      ensureMonoSides(s);
-      if (!s.L.done) s.L.kg = String(kg);
-      if (!s.R.done) s.R.kg = String(kg);
-    } else {
-      s.kg = String(kg);
-    }
+  const x = exerciseConfig(weekLabel,day,exIndex); if(!x)return;
+  const plan=getPlannedLoad(x.e.name,weekLabel,day);
+  x.configs.forEach((c,si)=>{
+    const st=x.row.sets[si]; if(lockedField(x.e,c,'kg'))return;
+    if(st.L || st.R) ['L','R'].forEach(side=>{const sd=ensureMonoSides(st)[side]; if(!sd.done) { sd.kg=String(plan && plan.sides && plan.sides[side] && plan.sides[side].kg != null ? plan.sides[side].kg : kg); sd.kgSource='manual'; }});
+    else if(!st.done){st.kg=String(kg);st.kgSource='manual';}
   });
-  save();
-  render();
+  save(); render();
 }
 
 function exNoteAndNextLoadHtml(weekLabel, day, exIndex, exercise) {
@@ -2323,6 +2252,8 @@ function exNoteAndNextLoadHtml(weekLabel, day, exIndex, exercise) {
   const wJs = jq(weekLabel);
   const note = getExNote(weekLabel, day, exIndex);
   const isAcc = isAccessory(exercise);
+  const locked = isExNoteLocked(weekLabel, day, exIndex);
+  const dis = locked ? ' disabled' : '';
 
   let plannedBanner = '';
   let nextLoadSection = '';
@@ -2342,24 +2273,25 @@ function exNoteAndNextLoadHtml(weekLabel, day, exIndex, exercise) {
           <span>Avevi programmato <b>${esc(String(planned.kg))} kg</b> per questa sessione</span>
           ${planned.note ? `<span class="planned-note-hint"> — ${esc(planned.note)}</span>` : ''}
         </div>
-        <button type="button" class="planned-apply-btn" onclick='applyPlannedLoadToSets(${wJs}, ${day}, ${exIndex}, ${planned.kg})'>Applica a tutte</button>
+        <button type="button" class="planned-apply-btn"${dis} onclick='applyPlannedLoadToSets(${wJs}, ${day}, ${exIndex}, ${planned.kg})'>Applica a tutte</button>
       </div>`;
     }
 
     nextLoadSection = `<div class="next-load-section" data-ex="${esc(exercise.name)}" data-week="${esc(weekLabel)}" data-day="${esc(String(day))}">
       <label class="next-load-toggle ${activeClass}">
-        <input type="checkbox" ${planChecked} onchange="onToggleNextLoad(this)">
-        <span class="toggle-pill-text">Aumentare carico la prossima volta?</span>
+        <input type="checkbox" ${planChecked}${dis} onchange="onToggleNextLoad(this)">
+        <span class="toggle-pill-text">Modificare il carico la prossima volta?</span>
       </label>
       <div class="next-load-form ${plan ? '' : 'hidden'}">
         <div class="next-load-inputs">
           <label>Prossimo carico (kg)
-            <input type="number" inputmode="decimal" step="0.5" placeholder="es. 102.5" value="${esc(String(planKg))}"
+            <input type="number" inputmode="decimal" step="0.5" placeholder="es. 102.5"${dis} value="${esc(String(planKg))}"
               oninput="onNextLoadInputsChange(this)"
               onchange="onNextLoadInputsChange(this)">
           </label>
+          ${isMonolateral(exercise) ? ['L','R'].map(side => `<label>Prossimo carico ${side === 'L' ? 'sinistro' : 'destro'} (kg)<input type="number" inputmode="decimal" step="0.5" data-next-side="${side}"${dis} value="${esc(String(plan && plan.sides && plan.sides[side] && plan.sides[side].kg != null ? plan.sides[side].kg : ''))}" placeholder="Usa il carico comune" oninput="onNextLoadInputsChange(this)"></label>`).join('') : ''}
           <label>Nota (facoltativa)
-            <input type="text" class="next-load-note-input" placeholder="es. provare con cintura" value="${esc(planNote)}"
+            <input type="text" class="next-load-note-input" placeholder="es. provare con cintura"${dis} value="${esc(planNote)}"
               oninput="onNextLoadInputsChange(this)"
               onchange="onNextLoadInputsChange(this)">
           </label>
@@ -2368,10 +2300,11 @@ function exNoteAndNextLoadHtml(weekLabel, day, exIndex, exercise) {
     </div>`;
   }
 
-  return `<div class="ex-notes-wrap">
+  return `<div class="ex-notes-wrap ${locked ? 'ex-notes-locked' : ''}"${locked ? ' aria-disabled="true"' : ''}>
+    ${locked ? '<p class="ex-notes-lock-hint">🔒 Esercizio completato · note bloccate. Annulla il completamento per modificarle.</p>' : ''}
     ${plannedBanner}
     <div class="ex-note-field">
-      <textarea class="ex-note-input" placeholder="Note per questo esercizio…" rows="2"
+      <textarea class="ex-note-input" placeholder="Note per questo esercizio…" rows="2"${dis}
         oninput="setExNote(${wJs},${day},${exIndex},this.value)"
         onchange="setExNote(${wJs},${day},${exIndex},this.value)">${esc(note)}</textarea>
     </div>
@@ -2404,21 +2337,7 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
   // allinea lunghezza: MAV extra già in log
   const eff0 = buildEffectiveConfigs(complex, log);
   while (log.sets.length < eff0.length) log.sets.push({ kg: '', reps: '', done: false });
-  // precompila rip fisse (MAV / % del MAV)
-  eff0.forEach((cfg, i) => {
-    if (!log.sets[i]) return;
-    if (cfg.reps != null && (log.sets[i].reps === '' || log.sets[i].reps == null)) {
-      log.sets[i].reps = String(cfg.reps);
-    }
-    if (cfg.kgLocked && cfg.role === 'mavBackoff') {
-      const mavKg = getMavKgFromLog(log, eff0);
-      const pct = cfg.pctOfMav;
-      if (mavKg != null && pct != null) {
-        const kg = Math.round(mavKg * pct / 100 / 2.5) * 2.5;
-        if (log.sets[i].kg === '' || log.sets[i].kg == null) log.sets[i].kg = String(kg);
-      }
-    }
-  });
+  resolveCalculatedSets(weekLabel, day, exIndex);
   const effConfigs = buildEffectiveConfigs(complex, log);
 
   const sugKg = (T.backoffPct || T.mav) ? null : prescribedKg(exercise.text, lift);
@@ -2428,10 +2347,17 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
   const restSec = getRestSec(exercise.name);
   const mono = !main && isMonolateral(exercise);
   if (mono) log.sets.forEach(st => ensureMonoSides(st));
+  // Carico scelto con "Modificare il carico la prossima volta?" nell'ultima sessione: compare come suggerimento verde nel campo kg
+  const plannedLoad = (!main && !isPastEntry()) ? getPlannedLoad(exercise.name, weekLabel, day) : null;
+  const plannedKgFor = side => {
+    if (!plannedLoad || plannedLoad.kg == null) return '';
+    const sk = side && plannedLoad.sides && plannedLoad.sides[side] && plannedLoad.sides[side].kg != null ? plannedLoad.sides[side].kg : plannedLoad.kg;
+    return sk == null || !Number.isFinite(Number(sk)) ? '' : String(sk);
+  };
 
   return `<div class="sets-wrap ${allLocked ? 'sets-locked' : ''} ${mono ? 'sets-mono' : ''}">
     ${multiBlock ? '' : (T.mode === 'ramp' ? rampHeaderHtml(T, info, log, est, lift) : (T.mode === 'free' ? '<p class="ramp-info">Istintivo: kg e rip liberi, scegli a sensazione</p>' : ''))}
-    ${log.sets.map((s, si) => {
+    ${log.sets.slice(0,effConfigs.length).map((s, si) => {
     const c = effConfigs[si] || effConfigs[effConfigs.length - 1] || {};
     const cT = c.T || T;
     const cInfo = c.info || info;
@@ -2444,17 +2370,18 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
     let prescKg = c.kg != null ? c.kg : null;
     // 100% del MAV → kg dalla serie MAV
     if ((c.role === 'mavBackoff' || c.pctOfMav != null || (c.T && c.T.pctOfMav != null)) && prescKg == null) {
-      const mavKg = getMavKgFromLog(log, complex.configs);
+      const mavKg = getMavKgFromLog(log, effConfigs, si);
       const pct = c.pctOfMav != null ? c.pctOfMav : (c.T && c.T.pctOfMav);
       if (mavKg != null && pct != null) prescKg = Math.round(mavKg * pct / 100 / 2.5) * 2.5;
     }
 
-    const isMav = !!(c.role === 'mav' || ((cT.mav || T.mav) && !cT.pctOfMav && c.role !== 'mavBackoff' && c.role !== 'rpe'));
-    const isRpe = c.role === 'rpe' || (!isMav && !!(cT.rpe || T.rpe) && mode === 'ramp' && c.role !== 'mavBackoff');
+    const isMav = !!(c.role === 'mav' || (cT.mav && !cT.pctOfMav && c.role !== 'mavBackoff' && c.role !== 'rpe'));
+    const isRpe = c.role === 'rpe' || (!isMav && !!cT.rpe && mode === 'ramp' && c.role !== 'mavBackoff');
     const isMavBo = c.role === 'mavBackoff' || c.pctOfMav != null || cT.pctOfMav != null;
     const pctMav = c.pctOfMav != null ? c.pctOfMav : cT.pctOfMav;
     // kg bloccato su % del MAV; MAV/RPE: kg libero; fixed main: tutto bloccato
-    const isLocked = isMavBo || (main && mode === 'fixed' && !isMav && !isRpe);
+    const isLocked = isCalculated(c) || (main && mode === 'fixed' && !isMav && !isRpe);
+    if (isCalculated(c)) prescKg = s.done ? exNum(s.kg) : calculatedKg(exerciseConfig(weekLabel, day, exIndex), si);
     // MAV e RPE: rip sempre fisse se prescritte (es. 3x3 RPE 7 → 3 rip)
     const repsEditable = (isMav || isMavBo || (isRpe && prescRep != null))
       ? false
@@ -2467,7 +2394,7 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
       + (mode === 'ramp' && !cInfo.roles && !isMav && (c.bpos != null ? c.bpos : si) >= (cInfo.count || 1) ? ' · extra' : '')
       + (mode === 'ramp' && cT.rpe && rpeOf(s) != null && rpeOf(s) >= cT.rpe.lo ? ' · target ✓' : '');
 
-    const isDone = !!s.done;
+    const isDone = !!s.done && !isPastEntry();
     let inputs = '';
 
     if (mono) {
@@ -2477,16 +2404,18 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
       const sides = [{ key: 'L', label: 'Sinistro' }, { key: 'R', label: 'Destro' }];
       const sidesHtml = sides.map(side => {
         const sd = s[side.key];
-        const sideDone = !!sd.done;
+        const sideDone = !!sd.done && !isPastEntry();
         const fromPrev = prevSetSideKg(log, si, side.key);
         const kgV = sd.kg != null && sd.kg !== '' ? esc(String(sd.kg)) : '';
         const repV = sd.reps != null && sd.reps !== '' ? esc(String(sd.reps)) : '';
-        const kgPh = fromPrev || 'kg';
+        const plannedSide = kgV === '' ? plannedKgFor(side.key) : '';
+        const kgPh = plannedSide || fromPrev || 'kg';
+        const kgCls = plannedSide ? ' class="kg-planned"' : '';
 
         if (sideDone) return `<div class="mono-side mono-side-done" data-side="${side.key}"><div class="mono-side-label">✓ ${side.label}</div><div class="set-readonly set-done-ro"><span class="set-ro-kg">${kgV ? kgV + ' kg' : '— kg'}</span><span class="set-x">×</span><span class="set-ro-reps">${repV ? repV + ' rip' : '— rip'}</span></div><p class="set-lock-hint">Fatto · tocca per sbloccare</p></div>`;
-        return `<div class="mono-side" data-side="${side.key}"><div class="mono-side-label">${side.label} ·${fmtRest(restSec)}</div><div class="set-inputs"><input type="number" inputmode="decimal" step="0.5" placeholder="${esc(String(kgPh))}" value="${kgV}" oninput="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','kg',this.value)" onchange="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','kg',this.value);cascadeMonoKgFromSet(${wJs},${day},${exIndex},${si},'${side.key}')"><span class="set-x">×</span><input type="number" inputmode="numeric" step="1" placeholder="${prescRep != null ? prescRep : 'rip'}" value="${repV}" oninput="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','reps',this.value)" onchange="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','reps',this.value)"></div><p class="set-lock-hint">Tocca qui → fatto + recupero</p></div>`;
+        return `<div class="mono-side" data-side="${side.key}"><div class="mono-side-label">${side.label} ·${fmtRest(restSec)}</div><div class="set-inputs"><input data-field="kg"${kgCls} type="number" inputmode="decimal" step="0.5" placeholder="${esc(String(kgPh))}" value="${kgV}" oninput="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','kg',this.value)" onchange="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','kg',this.value);cascadeMonoKgFromSet(${wJs},${day},${exIndex},${si},'${side.key}')"><span class="set-x">×</span><input data-field="reps" type="number" inputmode="numeric" step="1" placeholder="${prescRep != null ? prescRep : 'rip'}" value="${repV}" oninput="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','reps',this.value)" onchange="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','reps',this.value)"></div><p class="set-lock-hint">Tocca qui → fatto + recupero</p></div>`;
       }).join('');
-      const pm = prevInfo && prevInfo.sets ? (prevInfo.sets[si] || prevInfo.sets[prevInfo.sets.length - 1]) : null;
+      const pm = prevInfo && prevInfo.sets ? (prevInfo.sets[si]) : null;
       const hasV = v => v !== '' && v != null;
       const pmTxt = x => (x && hasV(x.kg) ? esc(String(x.kg)) + ' kg' : '—') + ' × ' + (x && hasV(x.reps) ? esc(String(x.reps)) : '—');
       const monoHint = pm && (pm.L || pm.R) && [pm.L, pm.R].some(x => x && (hasV(x.kg) || hasV(x.reps)))
@@ -2511,7 +2440,7 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
       // forza rip nel log
       if (prescRep != null && (s.reps === '' || s.reps == null)) s.reps = String(prescRep);
       inputs = `<div class="set-inputs set-rpe">
-             <input type="number" inputmode="decimal" step="0.5" placeholder="kg" value="${kgVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
+             <input data-field="kg" type="number" inputmode="decimal" step="0.5" placeholder="kg" value="${kgVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
              <span class="set-x">×</span>
              <span class="set-ro-reps set-ro-inline">${esc(fixedRep)} rip</span>
            </div>
@@ -2523,31 +2452,33 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
       const bStart = si - (c.bpos || 0);
       const bLog = { sets: log.sets.slice(bStart, bStart + (c.bsize || log.sets.length)) };
       const bEst = multiBlock ? (prescKg != null ? prescKg : rpeTargetKg(cT, prescRep, lift)) : (prescKg != null ? prescKg : est);
-      const ph = rampPlaceholder(cT, cInfo, bLog, c.bpos || 0, bEst);
+      const plannedRamp = kgVal === '' ? plannedKgFor() : '';
+      const ph = plannedRamp || rampPlaceholder(cT, cInfo, bLog, c.bpos || 0, bEst);
       const roRepAttr = !repsEditable ? 'readonly class="ro-input" tabindex="-1"' : '';
 
       inputs = `<div class="set-inputs set-ramp">
-             <input type="number" inputmode="decimal" step="0.5" placeholder="${esc(ph)}" value="${kgVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
+             <input data-field="kg"${plannedRamp ? ' class="kg-planned"' : ''} type="number" inputmode="decimal" step="0.5" placeholder="${esc(ph)}" value="${kgVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
              <span class="set-x">×</span>
-             <input type="number" inputmode="numeric" step="1" placeholder="${prescRep != null ? prescRep : 'rip'}" value="${repVal}" ${roRepAttr} oninput="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)">
+             <input data-field="reps" type="number" inputmode="numeric" step="1" placeholder="${prescRep != null ? prescRep : 'rip'}" value="${repVal}" ${roRepAttr} oninput="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)">
              <span class="set-at">@</span>
-             <input type="number" inputmode="decimal" step="0.5" min="1" max="10" placeholder="${cT.rpe ? esc(String(cT.rpe.hi)) : 'RPE'}" value="${rpeVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'rpe',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'rpe',this.value)">
+             <input data-field="rpe" type="number" inputmode="decimal" step="0.5" min="1" max="10" placeholder="${cT.rpe ? esc(String(cT.rpe.hi)) : 'RPE'}" value="${rpeVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'rpe',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'rpe',this.value)">
            </div>
            <p class="set-lock-hint">kg × rip @ RPE sentito · tocca la card quando hai finito</p>`;
     } else {
-      const pSet = prevInfo && prevInfo.sets ? (prevInfo.sets[si] || prevInfo.sets[prevInfo.sets.length - 1]) : null;
+      const pSet = prevInfo && prevInfo.sets ? (prevInfo.sets[si]) : null;
       const prevHint = pSet && ((pSet.kg !== '' && pSet.kg != null) || (pSet.reps !== '' && pSet.reps != null)) ? `<p class="set-prev-hint">Scorsa (${esc(String(prevInfo.label || prevInfo.week))}): <b>${pSet.kg !== '' && pSet.kg != null ? esc(String(pSet.kg)) + ' kg' : '—'} × ${pSet.reps !== '' && pSet.reps != null ? esc(String(pSet.reps)) + ' rip' : '—'}</b> · cerca di migliorare</p>` : '';
       const fromPrev = prevSetKg(log, si);
       const kgVal = s.kg != null && s.kg !== '' ? esc(String(s.kg)) : '';
       const repVal = s.reps != null && s.reps !== '' ? esc(String(s.reps)) : (!repsEditable && prescRep != null ? String(prescRep) : '');
-      const kgPh = fromPrev ? String(fromPrev) : 'kg';
-      const suggestNote = fromPrev && (s.kg === '' || s.kg == null) ? `<p class="set-prev-hint">Suggerito serie prec.: <b>${esc(String(fromPrev))} kg</b> (placeholder)</p>` : '';
+      const plannedKg = kgVal === '' ? plannedKgFor() : '';
+      const kgPh = plannedKg || (fromPrev ? String(fromPrev) : 'kg');
+      const suggestNote = !plannedKg && fromPrev && (s.kg === '' || s.kg == null) ? `<p class="set-prev-hint">Suggerito serie prec.: <b>${esc(String(fromPrev))} kg</b> (placeholder)</p>` : '';
       const roRepAttr = !repsEditable ? 'readonly class="ro-input" tabindex="-1"' : '';
 
       inputs = `<div class="set-inputs">
-             <input type="number" inputmode="decimal" step="0.5" placeholder="${esc(kgPh)}" value="${kgVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
+             <input data-field="kg"${plannedKg ? ' class="kg-planned"' : ''} type="number" inputmode="decimal" step="0.5" placeholder="${esc(kgPh)}" value="${kgVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
              <span class="set-x">×</span>
-             <input type="number" inputmode="numeric" step="1" placeholder="${prescRep != null ? prescRep : 'rip'}" value="${repVal}" ${roRepAttr} oninput="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)">
+             <input data-field="reps" type="number" inputmode="numeric" step="1" placeholder="${prescRep != null ? prescRep : 'rip'}" value="${repVal}" ${roRepAttr} oninput="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)">
            </div>${suggestNote}${prevHint}`;
     }
 
@@ -2676,6 +2607,7 @@ function restPickerHtml() {
 /* ---- Timer recupero + suono/notifica ---- */
 let _restTimer = null;
 function playRestBeep() {
+  if (S.preferences && S.preferences.restSound === false) return;
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
@@ -2697,6 +2629,7 @@ function playRestBeep() {
   } catch (e) { }
 }
 async function notifyRestDone(name) {
+  if (isPastEntry() || (S.preferences && S.preferences.restNotification === false)) return;
   try {
     if (!('Notification' in window)) return;
     if (Notification.permission === 'default') {
@@ -2764,6 +2697,7 @@ function openSystemRestTimer(secOrStop, ev) {
 }
 function onRestFinished() {
   if (_restTimer && _restTimer._done) return;
+  armRestReminder(_restTimer && _restTimer.name);
   if (_restTimer) _restTimer._done = true;
   if (_restTimer && _restTimer._iv) {
     clearInterval(_restTimer._iv);
@@ -2808,27 +2742,31 @@ function startRestTicker() {
   _restTimer._iv = setInterval(restTick, 200);
 }
 function startRest(name, ev) {
-  if (ev) { try { ev.stopPropagation(); ev.preventDefault(); } catch (e) { } }
+  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+  if (isPastEntry()) return;
+  if (_restTimer && _restTimer._iv) clearInterval(_restTimer._iv);
+  if (_systemRestLaunch) clearTimeout(_systemRestLaunch);
   const sec = getRestSec(name) || 120;
-  if (_restTimer && _restTimer._iv) {
-    clearInterval(_restTimer._iv);
-    _restTimer._iv = null;
-  }
-  const endsAt = Date.now() + sec * 1000;
-  _restTimer = { endsAt: endsAt, name: String(name || ''), left: sec, _done: false };
-  try { localStorage.setItem('powerapp_rest_ends', String(endsAt)); localStorage.setItem('powerapp_rest_name', String(name || '')); } catch (e) { }
-
-  startRestTicker();
-  render();
-  restTick();
-
-  // iPhone: avvia subito il Timer di sistema (Comandi "Recupero PL")
+  const owner = _pendingRestOwner || [exCurProgId(), S.today && S.today.week, S.today && S.today.day, name, 'manual'].join('|');
+  _pendingRestOwner = null; S.restReminder = null;
+  _restTimer = { endsAt: Date.now() + sec * 1000, name: String(name || ''), left: sec, owner, _done: false };
+  localStorage.setItem('powerapp_rest_ends', String(_restTimer.endsAt));
+  localStorage.setItem('powerapp_rest_name', String(name || ''));
+  localStorage.setItem('powerapp_rest_owner', owner);
+  localStorage.removeItem('powerapp_rest_system');
+  startRestTicker(); save(); render(); restTick();
   if (isIosDevice() && S.restSystemTimer !== false) {
-    setTimeout(() => openSystemRestTimer(sec), 60);
+    _systemRestLaunch = setTimeout(() => {
+      _systemRestLaunch = null;
+      if (!_restTimer || _restTimer.owner !== owner) return;
+      _restTimer.systemStarted = true; localStorage.setItem('powerapp_rest_system', '1');
+      openSystemRestTimer(sec);
+    }, 60);
   }
 }
 /** Se torni in app dopo background, completa il timer se scaduto */
 function resumeRestTimerIfNeeded() {
+  if (isPastEntry()) { cancelRestTimer(); return; }
   try {
     const ends = parseInt(localStorage.getItem('powerapp_rest_ends') || '', 10);
     if (!ends) return;
@@ -2845,14 +2783,14 @@ function resumeRestTimerIfNeeded() {
       return;
     }
     if (left <= 0) {
-      if (!_restTimer) _restTimer = { endsAt: ends, name: name, left: 0, _done: false };
+      if (!_restTimer) _restTimer = { endsAt: ends, name: name, left: 0, owner: localStorage.getItem('powerapp_rest_owner'), _done: false };
       else { _restTimer.endsAt = ends; _restTimer.left = 0; }
       onRestFinished();
       return;
     }
     // riprendi conteggio se perso (JS sospeso)
     if (!_restTimer || !_restTimer._iv) {
-      _restTimer = { endsAt: ends, name: name, left: left, _done: false };
+      _restTimer = { endsAt: ends, name: name, left: left, owner: localStorage.getItem('powerapp_rest_owner'), systemStarted: localStorage.getItem('powerapp_rest_system') === '1', _done: false };
       startRestTicker();
       render();
       restTick();
@@ -2860,7 +2798,7 @@ function resumeRestTimerIfNeeded() {
   } catch (e) { }
 }
 function restBarHtml() {
-  if (!_restTimer) return '';
+  if (!_restTimer || (S.preferences && S.preferences.restBar === false)) return '';
   const left = Math.max(0, _restTimer.left | 0);
   const m = Math.floor(left / 60);
   const s = left % 60;
@@ -2868,6 +2806,7 @@ function restBarHtml() {
   return `<div class="rest-bar ${done ? 'done' : ''}" id="rest-bar">
     <div class="rest-bar-inner">
       <span class="rest-label">Recupero · ${esc(_restTimer.name)}</span>
+      ${S.preferences && S.preferences.restStop === false ? '' : '<button type="button" class="rest-cancel" onclick="cancelRestTimer()">Annulla</button>'}
       <span id="rest-timer-display" class="rest-time ${done ? 'done' : ''}">${done ? 'Fine!' : (m + ':' + String(s).padStart(2, '0'))}</span>
     </div>
   </div>`;
@@ -3066,11 +3005,32 @@ async function imp(inp) {
     S.progDraft = null;
     S.pgSel = null;
     const same = !!(prevProg && prevProg.id === prog.id);
+    const running = S.today && S.today.type === 'train' && !S.today.finished;
+    const defer = running && !confirm('Attivare la scheda aggiornata adesso?\nOK: attiva ora; Annulla: attiva dopo aver terminato la sessione corrente.');
+    if (defer) {
+      let start=0;
+      if (!same && prog.weeks.length > 1) { const choice=prompt('Settimana di partenza della nuova scheda (1–'+prog.weeks.length+')','1'); if(choice===null)return; const n=Number(choice); if(!Number.isInteger(n)||n<1||n>prog.weeks.length)throw new Error('Settimana non valida'); start=n-1; }
+      S.pendingStartWeek=start;
+      S.pendingProg = prog; archiveProg(prog); save(); render();
+      alert('Scheda pronta: sarà attivata dopo il salvataggio dell’allenamento corrente.');
+      return;
+    }
+    let startWeek = same ? Math.min(S.wi || 0, prog.weeks.length - 1) : 0;
+    if (!same && prog.weeks.length > 1) {
+      const choice = prompt('Da quale settimana vuoi iniziare? (1–' + prog.weeks.length + ')', '1');
+      if (choice === null) return;
+      const n = Number(choice);
+      if (!Number.isInteger(n) || n < 1 || n > prog.weeks.length) throw new Error('Settimana non valida');
+      startWeek = n - 1;
+    }
+    if (same && prevProg) reconcileProgramLogs(prevProg, prog);
     S.prog = prog;
     archiveProg(S.prog); // anche la nuova entra nel catalogo
-    S.wi = same ? Math.max(0, Math.min(S.wi || 0, prog.weeks.length - 1)) : 0;
+    S.wi = startWeek; markWeekSynced();
     S.chk = {};
-    S.today = null;
+    if (!same) { S.today = null; S.cycleCompleted=null; cancelRestTimer(); }
+    else if (S.today && S.today.type === 'train') { const aw=prog.weeks.find(w=>w.label===S.today.week); if(!aw || !dayExercises(aw,S.today.day)) { S.today=null; cancelRestTimer(); } }
+    rebuildExerciseChecks();
     // Piano ricostruito dallo storico (pallini allenamenti + rest)
     rebuildPianoFromStorico();
     save();
@@ -3164,23 +3124,14 @@ function askDay() {
   S.today = { date: dstr(), type: 'ask' }; save(); render()
 }
 function markAllSetsDone(week, day, i, done) {
-  const wObj = (S.prog && S.prog.weeks.find(x => x.label === week)) || W();
-  if (!wObj) return;
-  const exs = dayExercises(wObj, day);
-  if (!exs || !exs[i] || exs[i].warm) return;
-  const info = parseSets(exs[i].text);
-  const row = getExLog(week, day, i, info.count);
-  const flag = done !== false;
-  const mono = isMonolateral(exs[i]);
-  row.sets.forEach(s => {
-    s.done = flag;
-    if (mono || s.L || s.R) {
-      ensureMonoSides(s);
-      s.L.done = flag;
-      s.R.done = flag;
-      s.done = flag;
-    }
-  });
+  const x = exerciseConfig(week, day, i); if (!x) return;
+  // Accept the source first so dependent blocks are computed from real values.
+  for (let si = 0; si < x.configs.length; si++) {
+    if (done !== false && !acceptSetSuggestions(week, day, i, si)) return false;
+    markSetDone(week, day, i, si, done);
+  }
+  _pendingRestOwner = null;
+  return true;
 }
 function tg(i) {
   try { flushSetInputsFromDOM(); } catch (e) { }
@@ -3202,13 +3153,13 @@ function tg(i) {
   const exs = dayExercises(w, d);
   const e = exs && exs[i];
   if (e && !e.warm) {
-    const info = parseSets(e.text);
-    const row = getExLog(w.label, d, i, info.count);
+    const complex = parseComplexSets(e.text, blockExLift(e));
+    const row = getExLog(w.label, d, i, complex.configs.length);
     const allDone = row.sets.length > 0 && row.sets.every(s => !!s.done);
     if (!allDone) {
       if (!confirm('Non tutte le serie risultano fatte.\nVuoi davvero segnare l\'esercizio come completato?\n(Verranno segnate fatte anche tutte le serie.)')) return;
     }
-    markAllSetsDone(w.label, d, i, true);
+    if (markAllSetsDone(w.label, d, i, true) === false) { save(); render(); return; }
   }
   if (a.indexOf(i) < 0) a.push(i);
   save();
@@ -3234,6 +3185,7 @@ function logFinishedWorkout(weekLabel, day, weekdayOverride, dateOverride) {
   const entry = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
     type: 'train',
+    durationSeconds: !isPastEntry() && S.today && S.today.startedAt ? Math.max(0, Math.round((Date.now() - S.today.startedAt) / 1000)) : null,
     date: _date,
     at: new Date().toISOString(),
     week: weekLabel,
@@ -3253,14 +3205,15 @@ function logFinishedWorkout(weekLabel, day, weekdayOverride, dateOverride) {
           else if (/panca|bench/.test(n)) lift = 'b';
           else if (/stacco|deadlift|sumo|regular/.test(n)) lift = 'd';
         }
+        resolveCalculatedSets(weekLabel, day, i);
         const complex = parseComplexSets(e.text, lift);
         const log = getExLog(weekLabel, day, i, complex.configs.length);
         const effC = buildEffectiveConfigs(complex, log);
 
-        sets = (log.sets || []).map((s, si) => {
+        sets = (log.sets || []).slice(0,effC.length).map((s, si) => {
           const c = effC[si] || effC[effC.length - 1] || {};
           const mode = c.mode || 'fixed';
-          const prescKg = c.kg;
+          const prescKg = s.kgSource === 'calculated' ? exNum(s.kg) : c.kg;
           const prescRep = c.reps;
           const autoM = mode !== 'fixed';
 
@@ -3283,7 +3236,7 @@ function logFinishedWorkout(weekLabel, day, weekdayOverride, dateOverride) {
               const reps = sd.reps !== '' && sd.reps != null ? parseInt(sd.reps, 10) : null;
               return { kg: kg != null && !isNaN(kg) ? kg : null, reps: reps != null && !isNaN(reps) ? reps : null, done: !!sd.done };
             };
-            return { n: si + 1, mono: true, L: parseSide(s.L), R: parseSide(s.R), done: !!s.done, kg: null, reps: null };
+            return { ...setHistoryMeta(s), n: si + 1, mono: true, L: parseSide(s.L), R: parseSide(s.R), done: !!s.done, kg: null, reps: null };
           } else {
             const kgRaw = s.kg;
             const repsRaw = s.reps;
@@ -3293,6 +3246,7 @@ function logFinishedWorkout(weekLabel, day, weekdayOverride, dateOverride) {
             if (repsN != null && isNaN(repsN)) repsN = null;
           }
           return {
+            ...setHistoryMeta(s),
             n: si + 1,
             kg: kgN,
             reps: repsN,
@@ -3304,22 +3258,25 @@ function logFinishedWorkout(weekLabel, day, weekdayOverride, dateOverride) {
       const exNote = getExNote(weekLabel, day, i);
       const nextPlan = isAccessory(e) ? getNextLoadPlan(e.name, weekLabel, day) : null;
       return {
+        sid: e.sid || null,
         name: e.name,
         warm: !!e.warm,
         main: isMainLift(e),
         text: e.text || '',
-        done: ck.includes(i) || (sets && sets.some(x => x.done)),
+        done: ck.includes(i) || !!(sets && sets.length && sets.every(x => x.done)),
         sets: sets,
         note: exNote || '',
+        noteImageKey: getExNoteKey(weekLabel, day, i),
         nextKg: nextPlan && nextPlan.kg != null ? nextPlan.kg : null,
         nextNote: nextPlan && nextPlan.note || '',
+        nextSides: nextPlan && nextPlan.sides || null,
       };
     }),
   };
 
   S.workoutLog = S.workoutLog || [];
   S.workoutLog.unshift(entry);
-  if (S.workoutLog.length > 100) S.workoutLog.length = 100;
+  // Keep the complete workout history.
 }
 function deleteWorkoutLog(id) {
   if (!confirm('Eliminare questa voce dallo storico?\nIl Piano si aggiornerà di conseguenza.')) return;
@@ -3351,8 +3308,9 @@ function finish() {
     logFinishedWorkout(weekLabel, d, null, S.today.date);
   }
   rebuildPianoFromStorico();
-  if (!remaining(w).length && S.wi < S.prog.weeks.length - 1) S.wi++;
+  advanceCompletedWeek(weekLabel);
   S.today = { date: dstr(), type: 'rest', finished: 1, week: weekLabel, day: d };
+  cancelRestTimer(); activatePendingProgram();
   save();
   render();
 }
@@ -3385,7 +3343,7 @@ function oggi() {
   if (!w) return importCard();
 
   const t = S.today;
-  if (t && t.week) {
+  if (sessionHoldsWeek(t)) {
     const idx = S.prog.weeks.findIndex(x => x.label === t.week);
     if (idx >= 0) S.wi = idx;
   }
@@ -3523,8 +3481,9 @@ function renderTrainSession(week, day) {
           <div class="dt">${fmt(e.text, e.lift)}</div>
           ${techBadgesHtml(e)}${exProgNoteHtml(e)}
         </div>
-        ${setsBlock}
         ${timerBtn}
+        ${accessoryStartBanner(week.label, d, i, e)}
+        ${setsBlock}
       </div>
     </div>`;
   }).join('');
@@ -3815,7 +3774,7 @@ function importWorkoutCsvFile(input) {
         const ids = new Set((S.workoutLog || []).map(w => w.id));
         const toAdd = workouts.filter(w => !ids.has(w.id));
         S.workoutLog = toAdd.concat(S.workoutLog || []);
-        if (S.workoutLog.length > 200) S.workoutLog.length = 200;
+        // Keep the complete workout history.
       }
       workouts.forEach(w => { try { exIngestWorkout(w); } catch (e) { } });
       rebuildPianoFromStorico();
@@ -3836,21 +3795,19 @@ function importWorkoutCsvFile(input) {
 
 function formatSetLine(s, idx) {
   const n = s.n != null ? s.n : (idx + 1);
+  const num = v => (v != null && v !== '') ? esc(String(v).replace('.', ',')) : '—';
+  // Valori in colonne fisse: kg × rip (@RPE). Ogni cella resta su una riga sola.
+  const vals = (sd, rpe) => '<span class="hist-set-val"><span class="hs-kg"><b>' + num(sd.kg) + '</b> kg</span><span class="hs-x">×</span><span class="hs-rep"><b>' + num(sd.reps) + '</b> rip</span><span class="hs-rpe">' + (rpe != null && rpe !== '' ? '@' + esc(String(rpe).replace('.', ',')) : '') + '</span></span>';
+  const blk = s.blockIdx != null ? '<span class="hs-blk">Blocco ' + (s.blockIdx + 1) + '</span>' : '';
+  const ser = '<span class="hs-ser">Serie ' + (s.blockSet != null ? s.blockSet : n) + '</span>';
   if (s.mono || s.L || s.R) {
-    const L = s.L || {};
-    const R = s.R || {};
-    const fmt = (sd, lab) => {
-      const kg = sd.kg != null && sd.kg !== '' ? String(sd.kg).replace('.', ',') + ' kg' : '— kg';
-      const reps = sd.reps != null && sd.reps !== '' ? String(sd.reps) + ' rip' : '— rip';
-      const mark = sd.done ? '✓' : '·';
-      return `<div class="hist-set ${sd.done ? 'done' : ''}"><span class="hist-set-n">${mark} ${lab}</span><span class="hist-set-val">${esc(kg)} × ${esc(reps)}</span></div>`;
+    const row = (sd, lab) => {
+      sd = sd || {};
+      return '<div class="hist-set hist-set-side ' + (sd.done ? 'done' : '') + '"><span class="hist-set-n"><span class="hs-mark">' + (sd.done ? '✓' : '·') + '</span><span class="hs-side">' + lab + '</span></span>' + vals(sd, sd.rpe) + '</div>';
     };
-    return `<div class="hist-mono-set"><div class="hist-set-n" style="font-weight:800;margin:4px 0">Serie ${n}</div>${fmt(L, 'Sx')}${fmt(R, 'Dx')}</div>`;
+    return '<div class="hist-mono-set"><div class="hist-mono-head">' + blk + ser + '</div>' + row(s.L, 'Sx') + row(s.R, 'Dx') + '</div>';
   }
-  const kg = s.kg != null && s.kg !== '' ? String(s.kg).replace('.', ',') + ' kg' : '— kg';
-  const reps = s.reps != null && s.reps !== '' ? String(s.reps) + ' rip' : '— rip';
-  const mark = s.done ? '✓' : '·';
-  return `<div class="hist-set ${s.done ? 'done' : ''}"><span class="hist-set-n">${mark} Serie ${n}</span><span class="hist-set-val">${esc(kg)} × ${esc(reps)}${s.rpe != null && s.rpe !== '' ? ' @' + esc(String(s.rpe).replace('.', ',')) : ''}</span></div>`;
+  return '<div class="hist-set ' + (s.done ? 'done' : '') + '"><span class="hist-set-n"><span class="hs-mark">' + (s.done ? '✓' : '·') + '</span>' + blk + ser + '</span>' + vals(s, s.rpe) + '</div>';
 }
 function storico() {
   const list = S.workoutLog || [];
@@ -3858,6 +3815,8 @@ function storico() {
     <p class="big" style="font-size:16px;margin:0 0 8px">Esporta / Importa</p>
     <p class="mut" style="margin-bottom:10px">CSV con kg e rip di ogni serie. L'import deve corrispondere a una scheda presente in app (attuale o precedenti). Se sostituisci, il CSV deve includere tutte le schede già nello storico.</p>
     <button type="button" class="pri" onclick="exportWorkoutCsv()">⬇️ Esporta storico CSV</button>
+    <button type="button" onclick="exportHevyCsv()">⬇️ CSV per Hevy (formato Strong)</button>
+    <p class="mut">In Hevy: Import Strong CSV, unità kg. I file convertiti non sono ufficialmente supportati da Hevy.</p>
     <label class="btn" style="margin-top:8px;cursor:pointer">⬆️ Importa CSV
       <input type="file" accept=".csv,text/csv" style="display:none" onchange="importWorkoutCsvFile(this)">
     </label>
@@ -3918,7 +3877,7 @@ function storico() {
     const exList = (w.exercises || []).filter(e => !e.warm);
     const doneN = exList.filter(e => e.done || (e.sets && e.sets.some(s => s.done))).length;
     const tot = exList.length;
-    const blocks = exList.map(e => {
+    const blocks = exList.map((e, ei) => {
       let setsHtml = '';
       if (e.sets && e.sets.length) {
         setsHtml = `<div class="hist-sets">${e.sets.map((s, si) => formatSetLine(s, si)).join('')}</div>`;
@@ -3930,11 +3889,14 @@ function storico() {
         setsHtml = `<p class="mut hist-nosets">Nessun carico registrato</p>`;
       }
       let noteHtml = '';
-      if (e.note) noteHtml += `<div class="hist-ex-note"><span class="hist-note-icon">📝</span> ${esc(e.note)}</div>`;
-      if (e.nextKg != null) noteHtml += `<div class="hist-ex-next"><span class="hist-next-icon">📌</span> Prossima volta: <b>${esc(String(e.nextKg))} kg</b>${e.nextNote ? ' — ' + esc(e.nextNote) : ''}</div>`;
+      if (e.noteImageKey && S.noteImages && S.noteImages[e.noteImageKey] && S.noteImages[e.noteImageKey].length) noteHtml += '<div class="note-gallery history-gallery" data-note-key="' + esc(e.noteImageKey) + '"></div>';
+      if (e.note) noteHtml += `<div class="hist-ex-note"><span class="hist-note-icon">📝</span><span class="hist-ex-txt">${esc(e.note)}</span></div>`;
+      if (e.nextKg != null) noteHtml += `<div class="hist-ex-next"><span class="hist-next-icon">📌</span><span class="hist-ex-txt">Prossima volta: <b>${esc(String(e.nextKg))} kg</b>${e.nextNote ? ' — ' + esc(e.nextNote) : ''}</span></div>`;
       return `<div class="hist-ex-block ${e.done ? 'ok' : ''}">
         <div class="hist-ex-name">${e.done ? '✓ ' : ''}${esc(e.name)}</div>
         ${setsHtml}
+        <button type="button" class="history-note-edit" onclick="editHistoryNote(${jq(w.id)},${ei})">Modifica note</button>
+        ${prBadgeHtml(w, e)}
         ${noteHtml}
       </div>`;
     }).join('');
@@ -4013,6 +3975,7 @@ function piano() {
     <p class="mut" style="margin-bottom:12px">Promemoria ogni mattina alle ~7:00. Su iPhone: aggiungi l'app alla Home Screen da Safari, poi attiva qui.</p>
     ${pushBtn}
   </div>
+  ${trainingPreferencesHtml()}
   <h1>Timer recupero (iPhone)</h1>
   <div class="card">
     <p class="mut" style="margin-bottom:10px">Su iPhone il timer di sistema parte <b>in automatico</b> all’avvio del recupero e si ferma con <b>Stop</b>. Suona anche a schermo spento.</p>
@@ -4092,7 +4055,7 @@ function bindRestButtons() {
         return;
       }
       markSetDone(week, day, exi, seti, true);
-      startRest(name, ev);
+      if (_pendingRestOwner && !isPastEntry()) startRest(name, ev); else render();
     };
   });
   // Lati monolaterali: tap → fatto + recupero
@@ -4118,7 +4081,7 @@ function bindRestButtons() {
         return;
       }
       markSideDone(week, day, exi, seti, side, true);
-      startRest(name, ev);
+      if (_pendingRestOwner && !isPastEntry()) startRest(name, ev); else render();
     };
   });
   document.querySelectorAll('[data-mono-set-toggle]').forEach(btn => {
@@ -4141,7 +4104,7 @@ function bindRestButtons() {
         return;
       }
       markSetDone(week, day, exi, seti, true);
-      startRest(name, ev);
+      if (_pendingRestOwner && !isPastEntry()) startRest(name, ev); else render();
     };
   });
   document.querySelectorAll('.set-card input').forEach(inp => {
@@ -4156,16 +4119,11 @@ function bindRestButtons() {
       const exi = Number(card.getAttribute('data-exi'));
       const seti = Number(card.getAttribute('data-set'));
       if (week == null || Number.isNaN(exi) || Number.isNaN(seti)) return;
-      const inputs = [...card.querySelectorAll('input')];
-      const idx = inputs.indexOf(inp);
-      if (idx === 0) {
-        setExSetLog(week, day, exi, seti, 'kg', inp.value);
-        cascadeKgFromSet(week, day, exi, seti);
-      } else if (idx === 1) {
-        setExSetLog(week, day, exi, seti, 'reps', inp.value);
-      } else if (idx === 2) {
-        setExSetLog(week, day, exi, seti, 'rpe', inp.value);
-      }
+      const field = inp.dataset.field;
+      if (!field || inp.readOnly || inp.disabled) return;
+      const sideEl = inp.closest('.mono-side');
+      if (sideEl) setExSideLog(week, day, exi, seti, sideEl.dataset.side, field, inp.value);
+      else setExSetLog(week, day, exi, seti, field, inp.value);
     });
   });
 }
@@ -4805,7 +4763,7 @@ function pgNewProgram() {
   for (let k = 1; k <= nw; k++) { const days = {}; for (let d = 1; d <= nd; d++) days[d] = []; weeks.push({ label: 'SETT 1.' + k, n: k, days }); }
   S.prog = { id: newProgId(), name: name.trim(), fileName: name.trim() + '.docx', weeks };
   S.prog.base = pgClone(S.prog.weeks);
-  S.wi = 0; S.chk = {}; S.today = null; S.progDraft = null; S.pgSel = null;
+  S.wi = 0; markWeekSynced(); S.chk = {}; S.today = null; S.progDraft = null; S.pgSel = null;
   try { archiveProg(S.prog); } catch (e) { }
   S.view = 'programma'; save(); render();
 }
@@ -5238,6 +5196,7 @@ function render() {
     $('app').innerHTML = body + dayModalHtml() + pianoSessionHtml() + compModalHtml() + restPickerHtml() + pgSheetHtml();
     document.body.classList.toggle('modal-open', !!(S.dayModal || S.restPicker || S.pianoSession || S.compModal || (_pg.sheet && S.view === 'programma')));
     bindRestButtons();
+    enhanceTrainingUI();
 
     // ripristina scroll senza far ripartire dall'alto
     const restore = () => {
@@ -5272,6 +5231,535 @@ function render() {
   }
 }
 
+/* ===== Session data: one resolver for UI, calculations and history ===== */
+S.preferences = Object.assign({ restBar: true, restStop: true, restSound: true, restNotification: true, forgottenRest: true, reminderSeconds: 120, summary: true }, S.preferences || {});
+let _pendingRestOwner = null;
+let _systemRestLaunch = null;
+function isPastEntry() { return !!S.pianoSession || !!(S.today && S.today.fromPiano); }
+function setHistoryMeta(s) {
+  const out = {};
+  ['blockIdx', 'blockSet', 'blockText', 'blockRole', 'n', 'done'].forEach(k => { if (s[k] != null) out[k] = s[k]; });
+  return out;
+}
+function sessionExercise(week, day, i) {
+  const w = S.prog && S.prog.weeks.find(w => w.label === week);
+  return w && (dayExercises(w, day) || [])[i];
+}
+function exerciseConfig(week, day, i) {
+  const e = sessionExercise(week, day, i);
+  if (!e) return null;
+  const complex = parseComplexSets(e.text, blockExLift(e));
+  const row = getExLog(week, day, i, complex.configs.length);
+  const configs = buildEffectiveConfigs(complex, row);
+  while (row.sets.length < configs.length) row.sets.push({ kg: '', reps: '', done: false });
+  return { e, complex, row, configs };
+}
+function isCalculated(c) { return !!c && (c.role === 'mavBackoff' || (c.role === 'backoff' && c.T && c.T.backoffPct != null)); }
+function lockedField(e, c, field) {
+  if (!c) return true;
+  if (isCalculated(c)) return field === 'kg' || (field === 'reps' && c.reps != null);
+  if (isMainLift(e) && c.mode === 'fixed') return field === 'kg' || field === 'reps';
+  return field === 'reps' && c.reps != null && (c.role === 'mav' || c.role === 'rpe');
+}
+function calculatedKg(x, si) {
+  const c = x.configs[si];
+  if (!c) return null;
+  if (c.role === 'mavBackoff') {
+    const base = getMavKgFromLog(x.row, x.configs, si);
+    return base == null ? null : roundKg(base * c.pctOfMav / 100);
+  }
+  if (c.role === 'backoff' && c.T && c.T.backoffPct != null) {
+    let top = null;
+    for (let j = 0; j < si; j++) if (x.configs[j].role === 'top') {
+      const k = exNum(x.row.sets[j].kg); if (k > 0) top = top == null ? k : Math.max(top, k);
+    }
+    return top == null ? null : roundKg(top * (1 - c.T.backoffPct / 100));
+  }
+  return c.kg == null ? null : c.kg;
+}
+function resolveCalculatedSets(week, day, i) {
+  const x = exerciseConfig(week, day, i);
+  if (!x) return;
+  x.configs.forEach((c, si) => {
+    const st = x.row.sets[si];
+    Object.assign(st, { blockIdx: c.blockIdx, blockSet: c.bpos + 1, blockText: c.partText || '', blockRole: c.role || c.blockKind, n: si + 1 });
+    if (st.done) return; // performed sets are snapshots
+    if (lockedField(x.e, c, 'reps') && c.reps != null) st.reps = String(c.reps);
+    if (lockedField(x.e, c, 'kg')) {
+      const value = calculatedKg(x, si);
+      st.kg = value == null ? '' : String(value);
+      st.kgSource = 'calculated';
+    }
+  });
+}
+
+
+
+
+function matchingSetCards(week, day, i) {
+  return [...document.querySelectorAll('.set-card')].filter(card => card.dataset.week === String(week) && card.dataset.day === String(day) && card.dataset.exi === String(i));
+}
+function refreshSetValues(week, day, i) {
+  const x = exerciseConfig(week, day, i);
+  if (!x) return;
+  matchingSetCards(week, day, i).forEach(card => {
+    const si = Number(card.dataset.set), st = x.row.sets[si], c = x.configs[si];
+    if (!st || !c) return;
+    card.querySelectorAll('input[data-field]').forEach(inp => {
+      const el = inp.closest('.mono-side');
+      const data = el ? st[el.dataset.side] : st;
+      if (!data || data.done || inp === document.activeElement) return;
+      inp.value = data[inp.dataset.field] == null ? '' : data[inp.dataset.field];
+      inp.classList.toggle('kg-suggested', data.kgSource === 'inherited');
+    });
+    if (!st.done && lockedField(x.e, c, 'kg')) {
+      const kg = card.querySelector('.set-ro-kg');
+      if (kg) kg.textContent = st.kg !== '' && st.kg != null ? st.kg + ' kg' : 'Completa prima il MAV / top set';
+    }
+  });
+}
+
+function suggestedField(x, si, side, field, week, day) {
+  const st = side ? ensureMonoSides(x.row.sets[si])[side] : x.row.sets[si];
+  if (st[field] !== '' && st[field] != null) return st[field];
+  const c = x.configs[si];
+  if (field === 'kg' && lockedField(x.e, c, field)) return calculatedKg(x, si);
+  if (isAccessory(x.e)) {
+    const plan = getPlannedLoad(x.e.name, week, day);
+    if (field === 'kg' && plan && plan.kg != null) return side && plan.sides && plan.sides[side] && plan.sides[side].kg != null ? plan.sides[side].kg : plan.kg;
+    const prev = findPrevAccessorySets(x.e.name, week, day, !!side);
+    const p = prev && prev.sets[si];
+    const data = side ? p && p[side] : p;
+    if (data && data[field] !== '' && data[field] != null) return data[field];
+  }
+  if (field === 'reps') return c.reps == null ? null : c.reps;
+  if (field === 'kg') {
+    for (let j = si - 1; j >= 0 && x.configs[j].blockIdx === c.blockIdx; j--) {
+      const p = side ? x.row.sets[j][side] : x.row.sets[j];
+      if (p && p.kg !== '' && p.kg != null) return p.kg;
+    }
+  }
+  return null;
+}
+function acceptSetSuggestions(week, day, i, si, side) {
+  resolveCalculatedSets(week, day, i);
+  const x = exerciseConfig(week, day, i);
+  if (!x || !x.configs[si]) return false;
+  if (isCalculated(x.configs[si]) && calculatedKg(x, si) == null) {
+    alert('Completa prima il MAV o il top set da cui dipende questo blocco.'); return false;
+  }
+  const st = side ? ensureMonoSides(x.row.sets[si])[side] : x.row.sets[si];
+  const card = matchingSetCards(week, day, i).find(c => Number(c.dataset.set) === si);
+  const root = side && card ? card.querySelector('.mono-side[data-side="' + side + '"]') : card;
+  ['kg', 'reps', 'rpe'].forEach(field => {
+    if (st[field] !== '' && st[field] != null) return;
+    const inp = root && root.querySelector('input[data-field="' + field + '"]');
+    let value = inp && /^\d+(?:[.,]\d+)?$/.test(inp.placeholder) ? exNum(inp.placeholder) : null;
+    if (value == null && field !== 'rpe') value = suggestedField(x, si, side, field, week, day);
+    // Target RPE is not an actual reported RPE.
+    if (field === 'rpe') return;
+    if (value != null && Number.isFinite(Number(value))) { st[field] = String(value); st[field + 'Source'] = 'accepted'; }
+  });
+  return true;
+}
+function setOwner(week, day, i, si, side) { return [exCurProgId(), week, day, accSlot(week, day, i), si, side || 'both'].join('|'); }
+function markSetDone(week, day, i, setIdx, done) {
+  _pendingRestOwner = null;
+  const x = exerciseConfig(week, day, i); if (!x || !x.row.sets[setIdx]) return;
+  const st = x.row.sets[setIdx], flag = done !== false;
+  const mono = isMonolateral(x.e);
+  if (flag) {
+    if (mono) { if (!acceptSetSuggestions(week, day, i, setIdx, 'L') || !acceptSetSuggestions(week, day, i, setIdx, 'R')) return; }
+    else if (!acceptSetSuggestions(week, day, i, setIdx)) return;
+  }
+  st.done = flag;
+  if (mono || st.L || st.R) { ensureMonoSides(st); st.L.done = flag; st.R.done = flag; st.done = flag; }
+  const owner = setOwner(week, day, i, setIdx);
+  if (flag) { _pendingRestOwner = owner; S.restReminder = null; }
+  else cancelOwnedRest(week, day, i, setIdx);
+  syncExerciseDoneFromSets(week, day, i); save();
+}
+
+
+
+
+function cancelRestTimer() {
+  if (_systemRestLaunch) { clearTimeout(_systemRestLaunch); _systemRestLaunch = null; }
+  if (_restTimer && _restTimer._iv) clearInterval(_restTimer._iv);
+  const hadSystemTimer = !!(_restTimer && _restTimer.systemStarted);
+  _restTimer = null; _pendingRestOwner = null; S.restReminder = null;
+  ['ends', 'name', 'owner', 'system'].forEach(k => localStorage.removeItem('powerapp_rest_' + k));
+  if (hadSystemTimer && isIosDevice() && S.restSystemTimer !== false) openSystemRestTimer('stop');
+  save();
+  const bar = document.getElementById('rest-bar'); if (bar) bar.remove();
+}
+function cancelOwnedRest(week, day, i, si, side) {
+  const owner = localStorage.getItem('powerapp_rest_owner') || '';
+  const prefix = setOwner(week, day, i, si).replace(/\|both$/, '|');
+  if (owner.startsWith(prefix) && (!side || owner.endsWith('|' + side) || owner.endsWith('|both'))) cancelRestTimer();
+  S.restReminder = null;
+}
+
+/** Completare i giorni di una settimana NON cambia più la settimana: il passaggio avviene ogni lunedì (syncWeekWithCalendar).
+ *  Resta solo la segnalazione di programma concluso quando si finisce l'ultima settimana. */
+function advanceCompletedWeek(label) {
+  const idx = S.prog && S.prog.weeks.findIndex(w => w.label === label);
+  if (idx == null || idx < 0 || idx !== S.wi || remaining(S.prog.weeks[idx]).length) return;
+  if (idx >= S.prog.weeks.length - 1) S.cycleCompleted = { progId: exCurProgId(), date: dstr() };
+}
+
+/* ===== Settimana del programma: ogni lunedì (data locale del dispositivo) passa alla successiva ===== */
+/** Lunedì (YYYY-MM-DD, data locale) della settimana che contiene la data d. */
+function localMondayStr(d) {
+  d = d || new Date();
+  return dstr(new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7)));
+}
+/** Numero di lunedì trascorsi tra due lunedì 'YYYY-MM-DD' (aritmetica su giorni di calendario, immune all'ora legale). */
+function weeksBetweenMondays(a, b) {
+  const t = x => { const p = String(x).split('-').map(Number); return Date.UTC(p[0], p[1] - 1, p[2]); };
+  return Math.round((t(b) - t(a)) / (7 * 86400000));
+}
+/** Una sessione di allenamento aperta tiene ferma la sua settimana finché non viene chiusa. */
+function sessionHoldsWeek(t) {
+  if (!t || t.type !== 'train' || t.finished || t.week == null) return false;
+  return t.date === dstr() || (!!t.startedAt && (Date.now() - t.startedAt) < 12 * 3600 * 1000);
+}
+/** Segna la selezione corrente come allineata al calendario (dopo import/attivazione di una scheda o scelta manuale). */
+function markWeekSynced() { S.weekSyncMonday = localMondayStr(); }
+/** Allinea S.wi al calendario. Ritorna true se la settimana selezionata è cambiata. */
+function syncWeekWithCalendar() {
+  if (!S.prog || !S.prog.weeks || !S.prog.weeks.length) return false;
+  const mon = localMondayStr();
+  if (!S.weekSyncMonday) { S.weekSyncMonday = mon; save(); return false; }  // primo avvio dopo l'aggiornamento: nessun salto
+  if (S.weekSyncMonday === mon) return false;
+  if (sessionHoldsWeek(S.today)) return false;                                // si applica alla chiusura della sessione
+  const elapsed = weeksBetweenMondays(S.weekSyncMonday, mon);
+  S.weekSyncMonday = mon;
+  let changed = false;
+  if (elapsed > 0) {
+    const last = S.prog.weeks.length - 1, from = Math.min(Math.max(S.wi || 0, 0), last), to = Math.min(from + elapsed, last);
+    changed = to !== S.wi; S.wi = to;                                         // all'ultima settimana si ferma
+  }
+  save();
+  return changed;
+}
+function rebuildExerciseChecks() {
+  if (!S.prog) return;
+  S.prog.weeks.forEach(w => days(w).forEach(d => (dayExercises(w, d) || []).forEach((e, i) => {
+    const existing = S.accLog && S.accLog[accKey(w.label, d)];
+    if (existing && existing[accSlot(w.label, d, i)]) syncExerciseDoneFromSets(w.label, d, i);
+  })));
+}
+function reconcileProgramLogs(oldProg, newProg) {
+  // Freeze changed prescriptions in completed history. Preserve session rows only when compatible.
+  S.programSessionArchive = S.programSessionArchive || [];
+  newProg.weeks.forEach(w => days(w).forEach(d => {
+    const ow = oldProg.weeks.find(x => x.label === w.label); if (!ow) return;
+    const key = accKeyFor(oldProg.id, w.label, d), rows = S.accLog[key]; if (!rows) return;
+    const oldList = dayExercises(ow, d) || [], newList = dayExercises(w, d) || [];
+    const occurrence = (list, name, n) => list.filter(e => getExId(e.name) === getExId(name))[n];
+    const counts = {};
+    oldList.forEach(e => {
+      const id = getExId(e.name), n = counts[id] || 0; counts[id] = n + 1;
+      const slot = id + (n ? '#' + n : '');
+      const next = occurrence(newList, e.name, n), row = rows[slot];
+      if (!row || (next && next.text === e.text)) return;
+      S.programSessionArchive.push({ progId: oldProg.id, week: w.label, day: d, exercise: e.name, prescription: e.text, row: JSON.parse(JSON.stringify(row)), archivedAt: Date.now() });
+      delete rows[slot];
+    });
+  }));
+}
+function accessoryStartBanner(week, day, i, e) {
+  if (!isAccessory(e)) return '';
+  const prev = findPrevAccessorySets(e.name, week, day, isMonolateral(e));
+  if (!prev || !prev.sets[0]) return '';
+  return '<div class="exercise-start-banner"><b>Ultima volta · prima serie</b><span>' + esc(exFmtSets([prev.sets[0]])) + '</span><small>' + esc(prev.label) + '</small></div>';
+}
+
+
+/* ===== Training preferences, summary and reminder ===== */
+function trainingPreferencesHtml() {
+  const options = [['restBar','Mostra barra del recupero'],['restStop','Mostra Annulla nella barra'],['restSound','Suono a fine recupero'],['restNotification','Notifica a fine recupero'],['forgottenRest','Promemoria recupero dimenticato'],['summary','Riepilogo all’inizio dell’allenamento']];
+  return archivedDraftsHtml() + '<h1>Preferenze allenamento</h1><div class="card training-preferences">' + options.map(([key,label]) => '<label class="preference-row"><span>' + label + '</span><input type="checkbox" ' + (S.preferences[key] !== false ? 'checked' : '') + ' onchange="setTrainingPreference(\'' + key + '\',this.checked)"></label>').join('') + '<label>Promemoria dopo (secondi)<input type="number" min="30" max="900" step="30" value="' + S.preferences.reminderSeconds + '" onchange="setTrainingPreference(\'reminderSeconds\',this.value)"></label><p class="mut">Il promemoria funziona mentre l’app è aperta e al rientro. Il suono del timer iPhone si gestisce separatamente con il timer di sistema.</p><button type="button" onclick="cancelRestTimer();render()">Annulla recupero attivo</button></div>';
+}
+function setTrainingPreference(key, value) {
+  if (!['restBar','restStop','restSound','restNotification','forgottenRest','summary','reminderSeconds'].includes(key)) return;
+  S.preferences[key] = key === 'reminderSeconds' ? Math.max(30, Math.min(900, Number(value) || 120)) : !!value;
+  if (key === 'forgottenRest' && !value) S.restReminder = null;
+  save(); render();
+}
+function activeSessionKey() {
+  const t = S.today;
+  return t && t.type === 'train' && !t.finished && !isPastEntry() ? [exCurProgId(),t.week,t.day,t.startedAt || t.date].join('|') : null;
+}
+function armRestReminder(name) {
+  const key = activeSessionKey(); if (!key) return;
+  S.restReminder = { key, name: name || '', since: Date.now(), dismissed: false }; save();
+}
+function checkForgottenRest() {
+  const r = S.restReminder, key = activeSessionKey();
+  const old = document.getElementById('forgotten-rest');
+  if (!r || !key || r.key !== key || r.dismissed || S.preferences.forgottenRest === false || (_restTimer && _restTimer.left > 0)) { if (old) old.remove(); return; }
+  if (document.visibilityState === 'hidden' || Date.now() - r.since < S.preferences.reminderSeconds * 1000 || old) return;
+  const div = document.createElement('aside'); div.id = 'forgotten-rest'; div.className = 'training-toast'; div.setAttribute('role','status');
+  const title = document.createElement('b'); title.textContent = 'Hai registrato la serie o avviato il recupero?'; div.appendChild(title);
+  const desc = document.createElement('p'); desc.textContent = r.name || 'Controlla il recupero prima della prossima serie.'; div.appendChild(desc);
+  if (r.name) { const go = document.createElement('button'); go.textContent = 'Avvia recupero'; go.onclick = () => startRest(r.name); div.appendChild(go); }
+  const close = document.createElement('button'); close.textContent = 'Sto ancora eseguendo'; close.onclick = () => { armRestReminder(r.name); div.remove(); }; div.appendChild(close);
+  const dismiss = document.createElement('button'); dismiss.textContent = 'Ignora'; dismiss.onclick = () => { r.dismissed = true; save(); div.remove(); }; div.appendChild(dismiss);
+  document.body.appendChild(div);
+}
+function showWorkoutSummary(force) {
+  const key = activeSessionKey();
+  if (!key || (!force && (S.preferences.summary === false || S.summarySeen === key))) return;
+  if (document.getElementById('workout-summary')) return;
+  const t = S.today, w = S.prog.weeks.find(w => w.label === t.week) || W();
+  const list = (dayExercises(w,t.day) || []).filter(e => isMainLift(e) && !e.warm);
+  const modal = document.createElement('div'); modal.id = 'workout-summary'; modal.className = 'modal-backdrop summary-backdrop';
+  modal.innerHTML = '<section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="summary-title"><h2 id="summary-title">Il tuo allenamento</h2><p>' + esc(w.label) + ' · Giorno ' + esc(t.day) + '</p>' + (list.length ? list.map(e => '<div class="summary-lift"><b>' + esc(e.name) + '</b><p>' + fmt(e.text,blockExLift(e)) + '</p></div>').join('') : '<p>Sessione dedicata ai complementari.</p>') + '<button type="button" class="pri">Inizia allenamento</button></section>';
+  const close = () => { S.summarySeen = key; save(); modal.remove(); };
+  modal.querySelector('button').onclick = close;
+  modal.addEventListener('keydown', ev => { if (ev.key === 'Escape') close(); });
+  document.body.appendChild(modal); modal.querySelector('button').focus();
+}
+function enhanceTrainingUI() {
+  document.body.classList.toggle('past-entry', isPastEntry());
+  document.querySelectorAll('.set-card').forEach(card => {
+    const week = card.dataset.week, day = Number(card.dataset.day), i = Number(card.dataset.exi), si = Number(card.dataset.set);
+    const x = exerciseConfig(week,day,i); if (!x || !x.configs[si]) return;
+    card.querySelectorAll('input[data-field]').forEach(inp => {
+      const sideEl = inp.closest('.mono-side'), side = sideEl && sideEl.dataset.side;
+      const value = suggestedField(x,si,side,inp.dataset.field,week,day);
+      if (value != null && inp.dataset.field !== 'rpe') inp.placeholder = String(value);
+      if (lockedField(x.e,x.configs[si],inp.dataset.field)) { inp.readOnly=true; const st=side ? x.row.sets[si][side] : x.row.sets[si]; if (st && st[inp.dataset.field] != null) inp.value=st[inp.dataset.field]; }
+      inp.addEventListener('focus', () => {
+        if (!isPastEntry() && (!S.restReminder || S.restReminder.dismissed)) armRestReminder(x.e.name);
+      });
+    });
+    if (isPastEntry()) {
+      card.onclick = null; card.removeAttribute('role'); card.title = 'Inserimento di un allenamento passato';
+      card.querySelectorAll('.mono-side').forEach(el => { el.onclick = null; });
+      card.querySelectorAll('.mono-set-toggle').forEach(el => { el.disabled = true; el.textContent = 'Serie · registrazione passata'; });
+      card.querySelectorAll('.set-lock-hint').forEach(el => el.textContent = 'Registra i valori · nessun timer');
+    }
+  });
+  document.querySelectorAll('.ex-note-field').forEach(field => {
+    const area = field.querySelector('textarea'); if (!area || field.querySelector('.note-media')) return;
+    const wrap = field.closest('.ex-body');
+    const card = wrap && wrap.querySelector('.set-card'); if (!card) return;
+    const week = card.dataset.week, day = Number(card.dataset.day), i = Number(card.dataset.exi);
+    const key = getExNoteKey(week,day,i);
+    const box = document.createElement('div'); box.className = 'note-media'; box.dataset.noteKey = key;
+    if (field.closest('.ex-notes-locked')) {
+      const gal = document.createElement('div'); gal.className = 'note-gallery'; box.appendChild(gal); field.appendChild(box);
+      renderNoteImages(key, gal, true);
+      return;
+    }
+    const label = document.createElement('label'); label.className = 'btn note-upload'; label.textContent = '＋ Foto nelle note';
+    const upload = document.createElement('input'); upload.type = 'file'; upload.accept = 'image/*'; upload.multiple = true; upload.hidden = true;
+    upload.onchange = () => uploadNoteImages(key, upload); label.appendChild(upload); box.appendChild(label);
+    const link = document.createElement('button'); link.type = 'button'; link.textContent = '＋ Link video'; link.onclick = () => {
+      const url = prompt('Incolla il link al video (https://…)'); if (!url) return;
+      try { if (!['http:','https:'].includes(new URL(url).protocol)) throw new Error(); } catch { alert('Inserisci un indirizzo http o https valido.'); return; }
+      area.value += (area.value ? '\n' : '') + url; setExNote(week,day,i,area.value);
+    }; box.appendChild(link);
+    const gallery = document.createElement('div'); gallery.className = 'note-gallery'; box.appendChild(gallery); field.appendChild(box);
+    renderNoteImages(key,gallery);
+  });
+  const hero = document.querySelector('.train-wrap .hero');
+  if (hero && !isPastEntry()) {
+    const btn = document.createElement('button'); btn.className = 'summary-open'; btn.textContent = 'Riepilogo allenamento'; btn.onclick = () => showWorkoutSummary(true); hero.appendChild(btn);
+    const key = activeSessionKey();
+    if (key && (!S.restReminder || S.restReminder.key !== key)) {
+      const t = S.today, w = S.prog.weeks.find(w => w.label === t.week) || W();
+      const first = (dayExercises(w,t.day) || []).find(e => !e.warm); armRestReminder(first && first.name);
+    }
+    setTimeout(() => showWorkoutSummary(false),0);
+  }
+  if (S.cycleCompleted && S.cycleCompleted.progId === exCurProgId() && S.view === 'oggi' && !activeSessionKey()) {
+    const el = document.createElement('div'); el.className = 'exercise-start-banner'; el.textContent = '✓ Programma concluso'; document.getElementById('app').prepend(el);
+  }
+  document.querySelectorAll('.history-gallery').forEach(g => renderNoteImages(g.dataset.noteKey,g,true));
+  document.querySelectorAll('.next-load-section').forEach(section => { if (section.closest('.ex-notes-locked')) return; const status=document.createElement('small'); status.className='next-load-status'; status.textContent='Le modifiche vengono salvate automaticamente'; section.appendChild(status); });
+  checkForgottenRest();
+  updateViewport();
+}
+function updateViewport() {
+  const vv = window.visualViewport;
+  const focused = document.activeElement;
+  const editing = focused && /INPUT|TEXTAREA|SELECT/.test(focused.tagName);
+  const keyboard = !!(vv && editing && window.innerHeight - vv.height > 120);
+  document.documentElement.classList.toggle('keyboard-open', keyboard);
+  document.documentElement.style.setProperty('--viewport-height', (vv ? vv.height : window.innerHeight) + 'px');
+  document.documentElement.style.setProperty('--viewport-top', (vv ? vv.offsetTop : 0) + 'px');
+}
+window.addEventListener('resize',updateViewport);
+window.addEventListener('orientationchange',updateViewport);
+if (window.visualViewport) { window.visualViewport.addEventListener('resize',updateViewport); window.visualViewport.addEventListener('scroll',updateViewport); }
+document.addEventListener('focusin',updateViewport);
+document.addEventListener('focusout',() => setTimeout(updateViewport,0));
+window.addEventListener('pagehide', () => { flushSetInputsFromDOM(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') save(); else { updateViewport(); try { if (syncWeekWithCalendar()) render(); } catch (e) { console.error(e); } checkForgottenRest(); } });
+setInterval(checkForgottenRest,1000);
+// App lasciata aperta a cavallo della mezzanotte del lunedì: aggiorna la settimana senza interrompere chi sta scrivendo
+setInterval(() => {
+  try {
+    if (!S.prog || S.weekSyncMonday === localMondayStr()) return;
+    const a = document.activeElement;
+    if (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) return;
+    if (syncWeekWithCalendar()) render();
+  } catch (e) { console.error(e); }
+}, 30000);
+
+/* ===== Records: compare only completed, equivalent exercise sets ===== */
+function recordMetrics(e) {
+  const out = [];
+  (e.sets || []).forEach(s => {
+    if (s.L || s.R) ['L','R'].forEach(side => { const sd = s[side]; if (sd && sd.done) out.push({ ...sd, side }); });
+    else if (s.done) out.push({ ...s, side: 'both' });
+  });
+  return out.filter(s => exNum(s.kg) > 0 && exInt(s.reps) > 0).map(s => ({ kg: exNum(s.kg), reps: exInt(s.reps), side: s.side, e1rm: exInt(s.reps) <= 12 ? (exInt(s.reps) === 1 ? exNum(s.kg) : exNum(s.kg)*(1+exInt(s.reps)/30)) : null }));
+}
+function prBadgeHtml(workout,e) {
+  const current = recordMetrics(e); if (!current.length) return '';
+  const past = (S.workoutLog || []).filter(w => w.id !== workout.id && (w.date < workout.date || (w.date === workout.date && String(w.at || '') < String(workout.at || ''))));
+  const old = past.flatMap(w => (w.exercises || []).filter(ex => getExId(ex.name) === getExId(e.name)).flatMap(recordMetrics));
+  if (!old.length) return '<span class="pr-badge baseline">Prima prestazione registrata</span>';
+  const labels = new Set(); let bestEstimate = null;
+  current.forEach(s => {
+    const same = old.filter(p => p.side === s.side); if (!same.length) return;
+    if (s.kg > Math.max(...same.map(p => p.kg))) labels.add('PR carico');
+    const rep = same.filter(p => p.reps === s.reps);
+    if (rep.length && s.kg > Math.max(...rep.map(p => p.kg))) labels.add('PR ' + s.reps + ' rep');
+    const estimates = same.filter(p => p.e1rm != null);
+    if (s.e1rm != null && estimates.length && s.e1rm > Math.max(...estimates.map(p => p.e1rm)) + 0.01) { labels.add('PR e1RM'); bestEstimate = Math.max(bestEstimate || 0,s.e1rm); }
+  });
+  return [...labels].map(label => '<span class="pr-badge" title="e1RM: formula Epley, kg × (1 + rep/30), massimo 12 rep; è una stima.">' + esc(label) + (label === 'PR e1RM' ? ' · ' + bestEstimate.toFixed(1) + ' kg stimati' : '') + '</span>').join('');
+}
+function hevyCsvText() {
+  const rows = [['Date','Workout Name','Duration','Exercise Name','Set Order','Weight','Reps','Distance','Seconds','Notes','Workout Notes','RPE']];
+  (S.workoutLog || []).filter(w => entryType(w) === 'train').slice().sort((a,b) => String(a.date).localeCompare(String(b.date)) || String(a.at).localeCompare(String(b.at))).forEach(w => {
+    let time = '12:00:00';
+    if (w.at) { const d = new Date(w.at); if (!Number.isNaN(+d)) time = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
+    const date = w.date + ' ' + time;
+    (w.exercises || []).filter(e => !e.warm).forEach(e => {
+      let setN = 0;
+      (e.sets || []).forEach((s,si) => {
+        const sides = s.L || s.R ? [['L',s.L],['R',s.R]] : [['',s]];
+        sides.forEach(([side,sd]) => {
+          if (!sd || !sd.done || exNum(sd.kg) == null || !(exInt(sd.reps) > 0)) return;
+          rows.push([date, w.title || w.progName || 'Allenamento', w.durationSeconds ? formatDuration(w.durationSeconds) : '00:00:00', e.name, ++setN, exNum(sd.kg), exInt(sd.reps),'','', [e.note, s.blockIdx != null ? 'Block ' + (s.blockIdx+1) + ', set ' + (s.blockSet || si+1) : 'Set '+(si+1), side === 'L' ? 'Left side' : side === 'R' ? 'Right side' : ''].filter(Boolean).join(' | '),w.progName || '',rpeOf(sd) == null ? '' : rpeOf(sd)]);
+        });
+      });
+    });
+  });
+  return rows.map(row => row.map(csvEsc).join(',')).join('\r\n');
+}
+function formatDuration(seconds) { const s = Math.max(0, Math.round(seconds)); return pad(Math.floor(s/3600))+':'+pad(Math.floor(s%3600/60))+':'+pad(s%60); }
+function downloadData(content,type,name) {
+  const url = URL.createObjectURL(new Blob([content],{type})); const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url),1500);
+}
+function exportHevyCsv() {
+  const csv = hevyCsvText(); if (csv.split('\r\n').length < 2) { alert('Nessuna serie eseguita con kg e ripetizioni da esportare.'); return; }
+  downloadData(csv,'text/csv;charset=utf-8','hevy-strong-'+dstr()+'.csv');
+}
+
+/* ===== Images: IndexedDB, compressed photos and complete backup ===== */
+let _mediaDBPromise;
+function mediaDB() {
+  if (_mediaDBPromise) return _mediaDBPromise;
+  _mediaDBPromise = new Promise((resolve,reject) => {
+    if (!window.indexedDB) { reject(new Error('Foto non disponibili in questo browser')); return; }
+    const req = indexedDB.open('powerapp_media_v1',1);
+    req.onupgradeneeded = () => req.result.createObjectStore('images',{keyPath:'id'});
+    req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
+  });
+  return _mediaDBPromise;
+}
+async function mediaOperation(mode,action) {
+  const db = await mediaDB();
+  return new Promise((resolve,reject) => { const tx = db.transaction('images',mode); const req = action(tx.objectStore('images')); let result;
+    if (req) req.onsuccess = () => result = req.result;
+    tx.oncomplete = () => resolve(result); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error || new Error('Salvataggio foto annullato'));
+  });
+}
+function mediaGet(id) { return mediaOperation('readonly',s => s.get(id)); }
+function mediaPut(record) { return mediaOperation('readwrite',s => s.put(record)); }
+function mediaDelete(id) { return mediaOperation('readwrite',s => s.delete(id)); }
+async function compressNoteImage(file) {
+  if (!file.type.startsWith('image/')) throw new Error('Seleziona una foto');
+  if (file.size > 25*1024*1024) throw new Error('Foto troppo grande (massimo 25 MB)');
+  const url = URL.createObjectURL(file), img = new Image();
+  try { await new Promise((resolve,reject) => { img.onload=resolve; img.onerror=() => reject(new Error('Formato immagine non leggibile. Usa JPG, PNG o WebP.')); img.src=url; });
+    const ratio = Math.min(1,1600/Math.max(img.naturalWidth,img.naturalHeight));
+    const canvas=document.createElement('canvas'); canvas.width=Math.max(1,Math.round(img.naturalWidth*ratio)); canvas.height=Math.max(1,Math.round(img.naturalHeight*ratio));
+    const ctx=canvas.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.drawImage(img,0,0,canvas.width,canvas.height);
+    return canvas.toDataURL('image/jpeg',0.8);
+  } finally { URL.revokeObjectURL(url); }
+}
+async function uploadNoteImages(key,input) {
+  const files=[...input.files]; input.disabled=true;
+  try {
+    for (const file of files) {
+      const data=await compressNoteImage(file), id='img_'+Date.now().toString(36)+Math.random().toString(36).slice(2);
+      await mediaPut({id,data,name:file.name,createdAt:Date.now()});
+      S.noteImages=S.noteImages || {}; (S.noteImages[key]=S.noteImages[key] || []).push({id,name:file.name}); save();
+    }
+    render();
+  } catch(e) { alert('Foto non salvata: '+e.message); }
+  finally { input.disabled=false; input.value=''; }
+}
+async function renderNoteImages(key,gallery,readonly) {
+  const images=(S.noteImages && S.noteImages[key]) || [];
+  for (const ref of images) {
+    try {
+      const rec=await mediaGet(ref.id); if (!gallery.isConnected) return;
+      const figure=document.createElement('figure');
+      if (rec) { const a=document.createElement('a'); a.href=rec.data; a.target='_blank'; a.rel='noopener'; const img=document.createElement('img'); img.src=rec.data; img.alt=ref.name || 'Foto esercizio'; img.loading='lazy'; a.appendChild(img); figure.appendChild(a); }
+      else { const p=document.createElement('span'); p.textContent='Foto non disponibile'; figure.appendChild(p); }
+      if (!readonly) { const btn=document.createElement('button'); btn.type='button'; btn.textContent='Elimina foto'; btn.onclick=async () => {
+        if (!confirm('Eliminare questa foto dalle note?')) return;
+        S.noteImages[key]=S.noteImages[key].filter(r=>r.id!==ref.id); save();
+        // Keep shared references intact when archived sessions still use the image.
+        if (!Object.values(S.noteImages).some(refs=>refs.some(r=>r.id===ref.id))) await mediaDelete(ref.id);
+        figure.remove();
+      }; figure.appendChild(btn); }
+      gallery.appendChild(figure);
+    } catch(e) { gallery.textContent='Foto non disponibili: '+e.message; }
+  }
+}
+
+
+
+
+function activatePendingProgram() {
+  if (!S.pendingProg) return;
+  const next=S.pendingProg, old=S.prog; const same=old && next.id===old.id;
+  if (same) reconcileProgramLogs(old,next);
+  S.prog=next; delete S.pendingProg;
+  S.wi=same ? Math.min(S.wi,next.weeks.length-1) : (S.pendingStartWeek || 0); delete S.pendingStartWeek;
+  if (!same) markWeekSynced();
+  S.today=null; S.chk={}; S.cycleCompleted=null;
+  rebuildPianoFromStorico(); rebuildExerciseChecks();
+  save();
+}
+
+function editHistoryNote(workoutId,index) {
+  const w=(S.workoutLog || []).find(w=>w.id===workoutId); if(!w)return;
+  const e=(w.exercises || []).filter(e=>!e.warm)[index]; if(!e)return;
+  const note=prompt('Note per '+e.name,e.note || ''); if(note===null)return;
+  e.note=note;
+  exEntriesFor(e.name).filter(en=>exSameSession(en,{progId:w.progId,week:w.week,day:w.day,date:w.date})).forEach(en=>en.note=note);
+  if(e.noteImageKey) S.exNotes[e.noteImageKey]=note;
+  else if(w.progId===exCurProgId()) { const list=dayExercises((S.prog.weeks || []).find(x=>x.label===w.week),w.day) || []; const i=list.findIndex(x=>x.name===e.name); if(i>=0)S.exNotes[getExNoteKey(w.week,w.day,i)]=note; }
+  save(); render();
+}
+
+function archivedDraftsHtml() {
+  const rows=S.programSessionArchive || [];
+  if(!rows.length)return '';
+  return '<details class="card"><summary>Dati conservati dagli aggiornamenti scheda ('+rows.length+')</summary><p class="mut">Le prescrizioni cambiate hanno nuove serie. Qui restano i valori inseriti prima dell’aggiornamento.</p>'+rows.slice().reverse().map(a=>'<div class="archived-draft"><b>'+esc(a.exercise)+'</b><p>'+esc(a.week)+' · Giorno '+esc(a.day)+'</p><p class="mut">'+esc(a.prescription || '')+'</p><p>'+esc(exFmtSets(a.row.sets || []))+'</p></div>').join('')+'</details>';
+}
 // Avvio: notifica (?prompt=1) o prima apertura del giorno
 (function bootPrompt() {
   try {
@@ -5290,6 +5778,7 @@ function render() {
 rebuildPianoFromStorico();
 try { migrateToV2(); } catch (e) { console.error(e); }
 try { pgInit(); } catch (e) { console.error(e); }
+try { syncWeekWithCalendar(); } catch (e) { console.error(e); }
 render();
 // Espone funzioni usate dagli onclick inline (iOS / strict)
 window.startRest = startRest;
