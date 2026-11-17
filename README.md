@@ -1,695 +1,381 @@
-# Powerlifting Program
+# Scheda Powerlifting
 
-A web app (PWA) for reading and using the coach's training program: you load the `.docx` file, the app converts percentages into kg, guides you workout by workout, records sets and weights, starts rest timers, and sends you a morning reminder.
+Web app installabile come PWA per consultare la scheda del coach, registrare serie e carichi, gestire i recuperi e conservare lo storico degli allenamenti.
 
-All logic runs in the browser (`script.js`). The server (Vercel) only serves the static files and the three APIs for push notifications.
+Importa una scheda `.docx`, imposta i massimali e usa le quattro sezioni **Oggi**, **Piano**, **Programma** e **Storico**. La lettura del documento e la gestione degli allenamenti avvengono nel browser. Le API del progetto servono per le notifiche push.
 
----
+Documentazione aggiornata il **17 novembre 2026**.
 
-## Table of Contents
+## Indice
 
-1. [Features overview](#features-overview)
-2. [The four screens](#the-four-screens)
-3. [Importing the program (.docx)](#importing-the-program-docx)
-4. [How the program text is read](#how-the-program-text-is-read)
-5. [Workout: sets, weights and rules](#workout-sets-weights-and-rules)
-6. [Per-exercise log (shared across programs)](#per-exercise-log-shared-across-programs)
-7. [Rest timer](#rest-timer)
-8. [Accessories (extra, outside the program)](#accessories-extra-outside-the-program)
-9. [Plan: weeks and Mon-Sun calendar](#plan-weeks-and-mon-sun-calendar)
-10. [Program editor](#program-editor)
-11. [History, CSV export and import](#history-csv-export-and-import)
-12. [Push notifications and daily popup](#push-notifications-and-daily-popup)
-13. [Saved data and limits](#saved-data-and-limits)
-14. [Project structure](#project-structure)
-15. [Vercel deployment](#vercel-deployment)
-16. [Local development and tests](#local-development-and-tests)
-17. [Troubleshooting](#troubleshooting)
+- [Avvio rapido](#avvio-rapido)
+- [Le quattro sezioni](#le-quattro-sezioni)
+- [Importazione della scheda](#importazione-della-scheda)
+- [Prescrizioni e blocchi](#prescrizioni-e-blocchi)
+- [Registrazione dell’allenamento](#registrazione-dellallenamento)
+- [Note, foto e link](#note-foto-e-link)
+- [Carico per la prossima volta](#carico-per-la-prossima-volta)
+- [Recuperi e timer iPhone](#recuperi-e-timer-iphone)
+- [Storico e scambio dei dati](#storico-e-scambio-dei-dati)
+- [Modifica della scheda](#modifica-della-scheda)
+- [Salvataggio e backup](#salvataggio-e-backup)
+- [Struttura e avvio locale](#struttura-e-avvio-locale)
+- [Notifiche e pubblicazione](#notifiche-e-pubblicazione)
+- [Aggiornamento dei file](#aggiornamento-dei-file)
+- [Problemi frequenti](#problemi-frequenti)
 
----
+## Avvio rapido
 
-## Features overview
+1. Apri l’app e carica la scheda del coach in formato `.docx`.
+2. In **Piano**, inserisci i massimali di squat, panca e stacco in kg.
+3. In **Oggi**, scegli allenamento o riposo; per allenarti seleziona il giorno della scheda.
+4. Registra i valori richiesti e tocca le serie quando le completi.
+5. Concludi l’allenamento per salvarlo nello **Storico** e aggiornare il **Piano**.
+6. Da **Piano**, scarica periodicamente un backup `.json`, soprattutto prima di cambiare dispositivo o cancellare dati del browser.
 
-| Area | What it does |
-|------|---------|
-| **Import program** | Reads the coach's `.docx` directly on the phone (nothing is uploaded to the server) |
-| **Automatic kg** | Converts % into kg using your squat, bench press and deadlift maxes, rounding to 2.5 kg |
-| **Text parsing** | Recognizes `5x3s`, `70%`, `@8` (RPE), and sequences such as `10-8-6-4` and displays them in a readable format; `3x8` is used to count sets and reps |
-| **Today** | Choose rest or training, then the program day; checklist with sets and weights |
-| **Set log** | One card for each set with kg and reps; tap it to mark it as done |
-| **Main lift rules** | Kg and reps are locked by the program; with RPE you can edit only the kg |
-| **Program accessories** | Free-entry fields, prefilled with what you did the last time you performed that exercise (even in a different program) |
-| **Unilateral exercises** | Separate sets for the left and right side, also kept separate in the history and prefill |
-| **Rest timer** | Per-exercise timer with customizable duration, sound, vibration and notification |
-| **Per-exercise log** | Each exercise has its own history, independent of the loaded program: a “Last time” line shows the previous session, and exercises with slightly different names are recognized as the same |
-| **Extra accessories** | Log a session outside the program, including CSV import from Hevy / Strong |
-| **Plan** | Maxes, notifications, weeks with 7 editable Mon-Sun dots |
-| **Workout history** | All workouts grouped by program, with delete and CSV export/import |
-| **Program switching** | You can load a new program without losing the history of older ones; the app recognizes whether a file is an update of a known program or a new one |
-| **Program editor** | A dedicated tab to edit the program: exercise names, sets/reps/percentages, order, per week or for all weeks, with draft, versions, undo and re-application of your edits when the coach sends a new file |
-| **Backup** | One-tap JSON backup of all app data from the Plan, and restore from a backup file |
-| **Calendar** | Link for adding the workout to Google Calendar with exercises and kg |
-| **Push notifications** | Morning reminder, enabled/disabled from the Plan, with a test notification |
-| **Daily popup** | “What day is it today?” on the first access of the day or when tapping the notification |
-| **Theme** | Light or dark depending on system preferences |
-| **PWA** | Installable on the Home Screen of iPhone and Android |
+Per installare l’app su iPhone, aprila in Safari e scegli **Condividi → Aggiungi alla schermata Home**. Su Android usa il comando di installazione del browser. Per le notifiche iPhone, apri l’app dalla sua icona.
 
----
+## Le quattro sezioni
 
-## The four screens
+| Sezione | Contenuto |
+| --- | --- |
+| **Oggi** | Scelta allenamento/riposo, esercizi, serie, carichi, note e recuperi. |
+| **Piano** | Massimali, preferenze, notifiche, timer iPhone, calendario settimanale, cambio scheda e backup. |
+| **Programma** | Consultazione e modifica della scheda: giorni, matrice delle settimane, statistiche e strumenti. |
+| **Storico** | Allenamenti e riposi raggruppati per scheda, dettagli delle serie, note ed esportazione/importazione CSV. |
 
-The bottom bar has four tabs: **Today**, **Plan**, **Program**, **History**. If you have not loaded a program yet, Today and Plan show the “Load the program” card.
+### Piano e calendario
 
-### Today
+Ogni settimana ha sette caselle, da lunedì a domenica:
 
-- At the top: today's date, the current week name, and progress (“X of Y completed”) with a progress bar.
+| Indicatore | Significato |
+| --- | --- |
+| Rosso con numero | Allenamento del giorno corrispondente della scheda. |
+| Rosso con `C` | Complementari extra. |
+| Rosso con spunta | Allenamento senza un giorno della scheda associato. |
+| Blu con trattino | Riposo. |
+| Grigio | Giorno non registrato. |
 
-- If you have not answered yet for today, **“What day is it today?”** appears with **Rest** and **Workout**.
+Tocca una settimana per selezionarla e un giorno per modificarlo. Puoi registrare un allenamento **con carichi e ripetizioni**, un allenamento **vuoto**, oppure un riposo. La registrazione di un allenamento passato non avvia i recuperi.
 
-- After **Workout**, choose **Day N** (with the focus: Squat, Bench, Deadlift, or “Accessories”) or **Accessories**. Already completed days have a checkmark. Each day has a different color (red, blue, orange, green).
+Il calendario viene ricostruito dallo storico: eliminare o importare una registrazione aggiorna anche gli indicatori. Il pulsante X di una settimana ne azzera le registrazioni dopo le conferme previste.
 
-- If you have already logged the day, you see the status (“Workout completed” or “Rest day”) and can use **Change answer**.
+## Importazione della scheda
 
-- The home screens display the coach's motivational image (`coach.jpg`).
+L’app legge i file Word `.docx` attraverso JSZip. **Il PDF non è un formato di importazione supportato.** JSZip viene caricato da cdnjs: deve essere disponibile una connessione per scaricare questa dipendenza.
 
-### Plan
+### Struttura del documento
 
-- **Maxes** (kg) for squat, bench press and deadlift. Initial values: 210 / 110 / 265. The field accepts only numbers greater than zero; otherwise, it restores the previous value and shows a warning.
+Usa tabelle Word con:
 
-- **Notifications**: enable, disable, send a test notification.
+- una riga di intestazione con almeno due colonne di settimane, per esempio `SETT 1.1` e `SETT 1.2`;
+- righe `GIORNO 1`, `GIORNO 2`, ecc. per separare i giorni;
+- una riga per esercizio, con il nome nella prima colonna e la prescrizione nelle colonne delle settimane;
+- un’unica cella di prescrizione se il testo deve valere per tutte le settimane.
 
-- **Weeks**: list of all weeks in the program with the 7 Mon-Sun dots (see below).
+Esempio:
 
-- **New program**: button for changing the `.docx` file.
+| Esercizio | SETT 1.1 | SETT 1.2 |
+| --- | --- | --- |
+| GIORNO 1 | | |
+| Squat | 5x3s 70% | 5x3s 72.5% |
+| Curl manubri | 3x10 | 3x10 |
 
-- **Download data backup (.json)**: saves a copy of all the app data (history, logs, settings).
+Le settimane vengono ordinate considerando la numerazione delle etichette. Controlla dopo l’importazione i giorni, i nomi e la classificazione degli esercizi.
 
-- **Restore backup (.json)**: replaces all current data with the content of a backup file (see [Backup](#backup)).
+### Riconoscimento e cambio scheda
 
-### Program
+L’app confronta nome del file ed esercizi con le schede conosciute. Se il riconoscimento è parziale, chiede se si tratta di un aggiornamento della stessa scheda oppure di una nuova.
 
-The editor for the program itself (names, sets, reps, order, notes). See [Program editor](#program-editor).
+Un aggiornamento mantiene il collegamento con la scheda esistente e può riapplicare le modifiche locali. Una nuova scheda riceve una propria identità. Lo storico delle schede precedenti viene conservato.
 
-### History
+Gli esercizi vengono riconosciuti tramite nomi normalizzati e alias. Varianti o attrezzature differenti possono avere registri distinti: per esempio panca e panca presa stretta non sono automaticamente equivalenti.
 
-- CSV export and import tools.
+## Prescrizioni e blocchi
 
-- All recorded workouts, grouped by program (see below).
+Le percentuali dei fondamentali usano il relativo massimale, con arrotondamento dei carichi a **2,5 kg**. Percentuali riferite a MAV o ad altri valori seguono la prescrizione specifica.
 
----
-
-## Importing the program (.docx)
-
-The file is read on the device using JSZip (loaded from cdnjs) and analyzed in `parseDocx`. Therefore, an internet connection is required the first time the library is downloaded.
-
-The parser looks for the following in Word tables:
-
-- a header row with at least two cells such as **SETT 0.1**, **SETT 1.2**, ... (each cell is a week);
-
-- rows **GIORNO 1**, **GIORNO 2**, ... that open a new day;
-
-- under each day, one row per exercise: the first column is the name, and the following columns contain the text for each week;
-
-- if a row has only one text cell, that text is applied to all weeks.
-
-Weeks are sorted according to the number after the dot (`SETT 1.2` → 2). If the same number appears more than once (for example two tables with `SETT 1.1–1.4` and `SETT 2.1–2.4`), the number before the dot is used first, so the blocks stay in order.
-
-### Automatic exercise classification
-
-| Type | How it is recognized |
-|------|-------------------------|
-| Warm-up | The name contains “riscaldamento” or “pre”. No sets or timer |
-| Squat | The name contains “squat” (including variations, which use the squat max) |
-| Bench | The name starts with “panca” (incline bench does not use the max and has no calculated kg) |
-| Deadlift | The name contains stacco, regular or sumo |
-| Accessory | Everything else (not warm-up and not a main lift) |
-
-If the file is invalid, an error appears (“No table with weeks found”). **PDF files are not supported**.
-
-### Program catalog and switching programs
-
-- When you load a new program, the current one is archived and the workout history is **not** deleted.
-
-- **Same program or new one?** The app compares the new file with the known programs using two signals:
-  - the **file name**, ignoring the extension, “(1)”, “copy”, “v2”, dates, accents and punctuation (`Scheda Gigi (1).docx` ≈ `scheda_gigi_v2.docx`);
-  - the **exercises** in the file: how many of them also appear in the known program.
-
-  If the name is similar (80% or more) **and** at least 70% of the exercises match, it is the same program: the identifier is reused, in-progress logs and history stay linked, and no question is asked. If only one of the two signals matches, the app asks “Update of the same program, or a new program?”. If neither matches, it is a new program.
-
-- When the update keeps the same program, the current week is kept (clamped to the number of weeks in the new file), and the edits you made in **Program** are re-applied on top of the new file (see [Program editor](#program-editor)).
-
-- The catalog stores up to 30 programs.
-
-- After switching, the Plan is rebuilt from the history.
-
----
-
-## How the program text is read
-
-The text of each exercise is reformatted in `fmt`:
-
-| In the file | In the app |
-|----------|----------|
-| `5x3s` (reps x sets, with the final “s”) | “3 sets × 5 reps” with the two numbers highlighted |
-| `70%` on a main lift | `70%` with the calculated **kg** next to it, based on the max and rounded to 2.5 kg |
-| `70%` with “del ...” (e.g. “% del 1RM di panca”), with “MAV” or on an accessory | “not based on max” label, without kg calculation |
-| `@8` | **RPE 8** badge |
-| `10-8-6-4` (3 or more numbers) | Badge with “4 sets: 10 · 8 · 6 · 4 reps” |
-
-### Number of sets (`parseSets`), in order:
-
-1. a sequence such as `10-8-6-4` or `5-5-5`: one set per number, with the target reps;
-
-2. `NxMs` (e.g. `5x3s`): M sets of N reps;
-
-3. `NxM` (e.g. `3x8`): N sets of M reps;
-
-4. “3 sets” or “4 sets”;
-
-5. otherwise, 3 sets.
-
-The prescribed weight for a main lift is the percentage in the text applied to the max, rounded to 2.5 kg.
-
----
-
-## Workout: sets, weights and rules
-
-During the workout (Today tab, after choosing the day) you see:
-
-- header with week, day, focus, completed exercises and progress bar;
-
-- for each exercise: number (or checkmark), name, formatted text, set cards, timer row and recent history;
-
-- **workout time** selector (default 17:00) and **Add to calendar** link;
-
-- **Workout finished**, **Mark finished anyway**, **Change day**, **Back to home** buttons.
-
-### Set cards
-
-Each set is a card with kg and reps. The rules change depending on the exercise type:
-
-| Type | Kg | Reps |
-|------|----|-----|
-| **Main lift without RPE** | Fixed by the program (from %) | Fixed by the program |
-| **Main lift with RPE** | Editable | Fixed by the program |
-| **Accessory** | Free | Free (with target if provided by the program) |
-| **Unilateral** | Free, one per side | Free, one per side |
-
-Interactions and automation:
-
-- **Tap the set card**: marks it as done and starts the rest timer. Tap again to undo. A completed set becomes read-only until unlocked.
-
-- **Kg propagation**: when you enter the kg for a set and leave the field, the value is suggested for subsequent sets that are still empty (and for unilateral exercises, also for the other side).
-
-- **Previous-set suggestion**: the placeholder shows the kg of the last completed/filled set.
-
-- **Accessory prefill**: if the fields are empty, they are filled with kg and reps from the **last time you performed that exercise**, in any program (see [Per-exercise log](#per-exercise-log-shared-across-programs)). Existing values are never overwritten. Under the set, “Previous (dd/mm): kg x reps” appears, with “other program” if it comes from a different program. For unilateral exercises, left and right are prefilled separately.
-
-- **Never lose what you type**: entered kg and reps are saved before every screen update.
-
-### Unilateral exercises
-
-An exercise is unilateral if its name or text contains “monolaterale”, “mono laterale”, “unilateral” or the word “mono” (e.g. “Curl con manubri (mono)”). For each set there are two blocks, **Left** and **Right**: tap a side to mark it as done and start the recovery. A large button marks the entire set (L + R). The set is complete when both sides are done.
-
-### Completing an exercise
-
-Tap the exercise number or name:
-
-- if not all sets are done, the app asks for confirmation and then marks **all** of them as done;
-
-- tapping the completed exercise again returns it to not done and unlocks the sets.
-
-### Ending the workout
-
-- **Workout finished** is enabled when all exercises are checked; otherwise the button shows “N exercises remaining” and you can use **Mark finished anyway**.
-
-- A workout started before midnight stays open for up to 12 hours, and it is logged with the date and weekday of when it **started**.
-- At the end, the app saves the session into the per-exercise log of every exercise, records the workout in History, updates the Plan and, if all days of the week have been completed, moves to the next week.
-
-### Exercise history
-
-Under each exercise (except warm-ups) you see a **“Last time”** line with the previous session (date, sets, planned next load if any, and “other program” if it was done in a different program), followed by up to 3 older sessions. Sets are grouped (`3×10 @ 20 kg`); unilateral sets show both sides (`3× sx 18 kg × 10 / dx 20 kg × 10`). The app keeps up to 50 sessions per exercise.
-
-### Google Calendar
-
-**Add to calendar** opens Google Calendar with an event at your preferred time, duration 1 hour 30 minutes, title “focus – week Gn”, and all exercises with the calculated kg in the details.
-
----
-
-## Per-exercise log (shared across programs)
-
-Every exercise has its own log, **separate from the loaded program**. When you switch program and the same exercise shows up again, the app tells you what you did the last time and prefills it.
-
-### How an exercise is recognized
-
-Each name is normalized into an exercise identifier: lowercase, no accents or punctuation, notes in parentheses and filler words (“con”, “di”, “il”...) removed, common synonyms unified (DB → manubri, BB → bilanciere, ...), and “mono / monolaterale / unilateral” removed (the unilateral flag is handled separately). Then names are compared:
-
-| Similarity | What happens |
-|------------|--------------|
-| 80% or more | Same exercise, automatically (`Curl manubri monolaterale` = `Curl con manubri (mono)`, `Leg curl` = `Leg Curl`) |
-| 50–80% | When you load a program, the app asks once “Is it the same exercise as …?”. The answer is remembered |
-| Below 50% | New exercise |
-
-Names that differ by a **modifier or the equipment** are never merged automatically: `Panca` ≠ `Panca presa stretta`, dumbbell ≠ barbell, and the same goes for incline, pause, front, sumo, high/low, etc., because the loads are not comparable.
-
-To merge two exercises manually, open the browser console, list the identifiers with `Object.keys(S.exReg)` and run `mergeExercises(fromId, toId)`; history, notes, rest times and in-progress logs are moved to the target.
-
-### What is stored
-
-For each exercise the app keeps up to **50 sessions**. A session contains: date, program, week, day, sets, note and the “next time” load.
-
-- Sets are stored as `kg` + `reps` (and RPE if present). For unilateral exercises each set has a left and a right side.
-- There is **one entry per program + week + day**: saving the same workout again updates it instead of adding a duplicate.
-- The log is written when you finish a workout, when you save a workout from the Plan, when you save an accessories session, and when you import a history CSV.
-- Deleting a workout from History (or resetting a week) also removes its entries from the exercise log.
-
-### “Last time” and prefill
-
-- The “Last time” line and the prefill use the most recent session of that exercise **in any program**, excluding the session you are currently editing. Week names are not used for matching, so two programs that both have “SETT 1.1” do not interfere.
-- Prefill only fills **empty** fields and only for accessories. Main lifts are never prefilled: their kg come from the percentages.
-- Sets are matched by position; if the new exercise has more sets than the last time, the last available set is reused.
-- Unilateral / bilateral conversion: if the last time was bilateral and the exercise is now unilateral, left and right both start from the same kg; if the last time was unilateral and the exercise is now bilateral, the **lower** of the two sides is used.
-- The planned “increase the load next time” value is taken only from the **latest** session of the exercise.
-
-### In-progress session data
-
-Sets that you are typing (not yet saved to the log) are stored with a key made of **program + week + day + exercise**. This means that (a) two programs with the same week names no longer overwrite each other, and (b) if an exercise is moved to a different row, its data follows the exercise instead of staying in the old position.
-
----
-
-## Rest timer
-
-- Every non-warm-up exercise has a **Start m:ss** button and a **Time** button to change the duration.
-
-- Default: **2:00**. Allowed range: 15 seconds to 10 minutes. The time is saved **per exercise**.
-
-- The **Rest time** selector has −15s / +15s, −1 min / +1 min and shortcuts 1:00, 1:30, 2:00, 3:00, 4:00, 5:00.
-
-- The timer also starts by **tapping a set** (or a side in unilateral exercises).
-
-- A bar at the top shows “Rest · exercise name” with the countdown and **Stop**.
-
-- At the end: three-tone sound (Web Audio), vibration on supported devices, notification “Rest finished” (the app asks for permission if you have not granted it yet), and the bar changes to “Done!” with a **Close** button.
-
-- The countdown is based on the end time, so it remains accurate even if the screen is slowed down. Keep the screen active to hear the sound.
-
----
-
-## Accessories (extra, outside the program)
-
-These are used to record an accessory session not included in the program. They can be opened from **Today > Workout > Accessories** or from **Plan** by tapping a day.
-
-The popup contains an **Exercise / Set / Rep / Kg** table:
-
-- the Exercise field suggests the names of accessories present in the program;
-
-- **Add exercise** adds a row, while **X** removes it;
-
-- consecutive rows with the same name are grouped into the same exercise;
-
-- the number of sets ranges from 1 to 20.
-
-### Loading a CSV
-
-Using the “Load CSV from Hevy” button:
-
-- supported formats: Hevy (Export Workouts), Strong, and this app's export;
-
-- accepts files using commas or semicolons;
-
-- skips warm-up sets and timer rows;
-
-- if weights are in pounds, converts them to kg (rounded to 0.5);
-
-- identical consecutive sets become a single row (e.g. 3 sets x 10 reps x 20 kg);
-
-- if the CSV contains multiple workouts, a menu appears to choose which one to use.
-
-Final buttons: **Save**, **Leave empty** (marks only the day) and **Cancel**. Saving updates History, the per-exercise log and Plan.
-
----
-
-## Plan: weeks and Mon-Sun calendar
-
-Each program week is a card with 7 dots:
-
-| Dot | Meaning |
-|---------|-------------|
-| Red with number | Day N workout |
-| Red with “C” | Accessories |
-| Red with checkmark | Workout without a program day |
-| Blue with dash | Rest |
-| Gray | Not recorded |
-
-Tapping a card selects that week as the current one. Tapping a day opens the editing panel:
-
-1. **Workout**: choose Day N (or Accessories). For program days, choose how to save it:
-
-   - **With weights and reps**: opens a popup with all exercises where you can enter kg and reps (optional); exercises without values are still considered completed;
-
-   - **Empty workout**: marks only the day, without set details.
-
-2. **Rest**: records rest for that day.
-
-3. **Delete**: deletes the record, with **double confirmation**.
-
-4. **Cancel**.
-
-The delete icon next to the week name **resets** all workouts for that week, with double confirmation.
-
-**The Plan is not a copy: it is always rebuilt from History.** If you delete or import workouts, the dots update accordingly.
-
----
-
-## Program editor
-
-The **Program** tab lets you change the loaded program without going back to the `.docx`. Everything you change goes into a **draft**; the rest of the app keeps using the current program until you press **Apply**.
-
-### Screens (chips at the top)
-
-| Tab | What it shows |
-|-----|---------------|
-| **Giorno** | Week chips, day chips and the exercises of that day as cards: name, prescription (with kg), type badge (**Fondamentale** / **Complementare** / **Riscaldamento**), “same in N weeks” or “different in …”, a dot if it differs from the coach's file, up/down buttons. Estimated session time and warnings at the bottom |
-| **Matrice** | Weeks as columns, exercises as rows (main lifts only, or all). Tap a cell to edit that exact week |
-| **Statistiche** | Sets, tonnage and average intensity per week with a bar chart, plus a preview with different maxes (not saved) |
-| **Strumenti** | Copy, progression generator, deload week, add/remove days and weeks, checks, versions, export, new/duplicate program |
-
-### Editing an exercise
-
-Tap **Modifica** (or a cell of the matrix) to open the edit sheet:
-
-- **Name**, with suggestions from the exercises the app already knows. Flags: Riscaldamento, or the lift it is (Squat / Panca / Stacco / none).
-- **Variant** and **scheme** pickers for main lifts: change the variant (Squat con pause, Panca presa stretta…) or fill the prescription from a scheme (5x5, 3x3, top set RPE + back-off, istintiva…).
-- **Prescription blocks**: each block is *Serie × rip*, *Percentuale*, *RPE*, *Istintiva* or free text; blocks are joined with `+`. A live preview shows how the app reads it (sets, kg from your maxes) and warns when the notation is not understood. You can also edit the raw text. Notation is the same one described in [How the program text is read](#how-the-program-text-is-read): `NxM` is *N sets of M reps*.
-- **Notes**: your note and a coach note, both shown under the exercise during the workout.
-- **Apply to**: only this week, all weeks, from this week on, only the weeks where it is still equal, or the weeks you choose. Only the parts you changed are overwritten, so changing the name does not touch the other weeks' prescriptions. Complementary exercises default to *all weeks*, main lifts to *this week only*.
-- **Other actions** (they follow the chosen scope): move to another day, **temporary substitution** (with the option to share the original exercise's history, and a button to go back), duplicate, delete, and **restore as in the coach's file**.
-
-Every row has a stable id (`sid`), the same in all weeks, so renaming or reordering an exercise keeps its weeks linked.
-
-### Names and history
-
-If you rename an exercise that already has history, the app asks whether it is **the same exercise** (history and “Last time” are kept) or a different one (separate history). Choosing a name the app already knows as a different exercise does not ask anything.
-
-### Draft, apply, versions
-
-- The bar at the top shows **Draft: N changes** with **Apply** and **Discard**. The draft is saved, so it survives closing the app.
-- **Apply** saves the previous version (the last 5 are kept) and refreshes the program. **Annulla ultima applicazione** (or *Versioni* in Strumenti) restores a previous version, and the current one is kept so you can go back.
-- Weeks you have already trained are marked ✓. Editing them asks for confirmation: the program changes, the workout history does not.
-- If a day's exercises change order or number, the in-progress checkmarks of that day are cleared. Logged sets are keyed by exercise, so they are not lost.
-
-### When the coach sends a new file
-
-The program keeps the **original coach's version** (`base`) next to your edits. If you load a new `.docx` that the app recognizes as the same program:
-
-1. your local edits (changed fields, added/deleted exercises, your order, weeks you added) are re-applied on top of the new file;
-2. if the coach changed the same row you changed, the app asks once: keep your version for the conflicts, or use the coach's (your other edits stay);
-3. the previous version is saved ("Prima del reimport del file") and a summary tells you how many edits were re-applied and how many could not be (for example because the coach renamed or removed the row);
-4. a pending draft must be applied or discarded first (the app asks).
-
-### Tools
-
-- **Copy**: a day or a whole week onto another week, or into a new week at the end.
-- **Progression generator**: pick a main lift, a range of weeks, starting %, + % per week, sets and reps.
-- **Deload week**: lowers percentages and sets of a week; rows with notation that is not simple are left untouched and counted.
-- **Days and weeks**: add a day, delete a day or a week.
-- **Checks**: duplicate exercise in a day, empty prescription, unrecognized notation, days with a different number of exercises across weeks.
-- **Export .docx**: writes the current program in the same table format the app reads (rows identical in all weeks become a single cell), useful to send it to the coach. A single-week program cannot be re-read by the importer, which needs at least two week columns.
-- **New empty program** (name, weeks, days), **duplicate program**, **rename**, and **restore everything as in the coach's file** (as a draft).
-
-### Limits
-
-- Reordering uses the up/down buttons (there is no drag and drop). By default the order changes in all weeks; untick *Riordina in tutte le settimane* to change only the current one.
-- The estimated duration uses each exercise's rest time plus about 45 seconds per set.
-- Statistics count only percentage-based main lifts for tonnage, and need a recognizable number of sets.
-
----
-
-## History, CSV export and import
-
-### List
-
-- Workouts are **grouped by program**: the title is the `.docx` file name, the current program is marked and appears first.
-
-- Each workout shows date, week, day, focus, how many exercises were completed out of the total, and for each set `kg x reps` with a checkmark if completed. Unilateral exercises show L and R.
-
-- Workouts marked from the Plan without details show “Marked from Plan (without set details)”.
-
-- Rest days appear as dedicated cards.
-
-- The delete icon removes the entry, with **double confirmation**, and updates the Plan.
-
-### Export CSV
-
-The export button downloads `storico-allenamenti-YYYY-MM-DD.csv` with one row per set and the columns:
-
-`workout_id, date, at, prog_id, prog_name, week, day, title, exercise, warm, main, exercise_done, set_n, kg, reps, set_done, kg_l, reps_l, kg_r, reps_r`
-
-For **unilateral** sets, `kg` and `reps` are empty and the left/right values are in `kg_l`, `reps_l`, `kg_r`, `reps_r`; the import restores both sides. CSV files exported by older versions (without these four columns) can still be imported.
-
-### Import CSV
-
-- The CSV must contain at least the columns `week` (or `settimana`), `day` (or `giorno`) and `exercise`.
-
-- Each workout must correspond to a program **present in the app** (current or previous); otherwise the import is rejected with the list of known weeks. If you have no program, load a `.docx` first.
-
-- If History is not empty, choose between **REPLACE** (OK) or **ADD** (Cancel). To replace, the CSV must contain all programs already present in History.
-
-- When adding, entries with an existing identifier are ignored.
-
-- At the end of the import, the Plan is rebuilt and the imported workouts are also added to the per-exercise log.
-
----
-
-## Push notifications and daily popup
-
-### Activation (from Plan)
-
-- **Enable notifications**: asks for permission, gets the public VAPID key from `/api/vapid`, creates the Web Push subscription and saves it to Redis through `/api/subscribe`.
-
-- **Disable notifications**: removes the subscription from the server and device.
-
-- **Send test notification**: immediately shows a local notification.
-
-- On iPhone, the app must be added to the Home Screen and opened from its icon.
-
-### What happens when it arrives
-
-- The service worker (`sw.js`) shows the notification with the `coach.jpg` icon and image; it remains visible until you interact with it.
-
-- Tapping the notification opens (or brings to the foreground) the app at `/?prompt=1`.
-
-- The app recognizes `?prompt=1` (or `?from=notif`) and immediately opens the **“What day is it today?”** popup with Rest / Workout options.
-
-### Daily popup
-
-It appears automatically on the **first access of the day**, if the day has not yet been recorded. The **Later** button closes it. If you switch tabs while it is open, it closes to prevent stuck screens.
-
-### Schedule
-
-The cron jobs in `vercel.json` are two, at 05:00 and 06:00 UTC (about 07:00 in Italy, depending on daylight saving time). For a fixed 07:00 Europe/Rome schedule you can use an external service such as cron-job.org:
-
-```
-https://YOUR-PROJECT.vercel.app/api/cron?key=YOUR_CRON_SECRET
+| Notazione | Interpretazione |
+| --- | --- |
+| `5x3s` | 3 serie da 5 ripetizioni: con la `s` finale l’ordine è ripetizioni × serie. |
+| `3x8` | 3 serie da 8 ripetizioni. |
+| `70%` | Percentuale del massimale, quando applicabile. |
+| `5@7` | 5 ripetizioni con obiettivo RPE 7. |
+| `10-8-6-4` | Quattro serie con ripetizioni differenti. |
+| `MAV` | Blocco di avvicinamento al carico MAV. |
+| `istintiva` | Blocco libero secondo la notazione riconosciuta. |
+
+Le prescrizioni composte vengono separate in blocchi. Per esempio:
+
+```text
+2x2s 70% + 5@7 + 70% no var istintiva 2x3s + istintiva
 ```
 
----
+| Blocco | Comportamento previsto |
+| --- | --- |
+| `2x2s 70%` | Serie, ripetizioni e carico prescritti. |
+| `5@7` | Ripetizioni prescritte, kg modificabili e serie adattabili dove consentito. |
+| `70% no var istintiva 2x3s` | Blocco con ripetizioni e carico prescritti. |
+| `istintiva` | Kg e ripetizioni liberi. |
 
-## Saved data and limits
+Un carico che dipende da un MAV o top set richiede prima il valore del blocco di riferimento. L’RPE obiettivo della scheda non viene registrato automaticamente come RPE effettivamente percepito.
 
-Everything stays in the browser/PWA `localStorage`, under the key `powerapp_v1`:
+Il parser usa regole di riconoscimento: con testi insoliti controlla l’anteprima in **Programma**. Se non riconosce il numero di serie, può usare il valore predefinito di tre serie.
 
-- loaded program, current week, maxes;
+## Registrazione dell’allenamento
 
-- exercise checkmarks, set log (kg, reps, completed, left/right sides);
+### Serie e completamento
 
-- Mon-Sun register for each week;
+Ogni serie ha una scheda con i valori da registrare. Toccarla la segna come eseguita e avvia il recupero; toccarla di nuovo annulla il completamento e la sblocca.
 
-- workout history, program catalog, per-exercise log (`exLog`), exercise names and aliases (`exReg`, `exAlias`);
-- the program with its coach's original (`prog.base`), the last 5 versions (`prog.versions`) and the unapplied draft (`progDraft`); every exercise carries a stable row id (`sid`);
+Il completamento dell’esercizio si aggiorna sia segnando le serie una alla volta sia toccando numero o intestazione dell’esercizio. In quest’ultimo caso, se mancano serie, viene chiesta conferma per completarle tutte.
 
-- rest seconds per exercise, workout time, notification state;
+Quando tutte le serie sono completate, **l’intero esercizio si attenua**, comprese le note. Le note della sessione completata non sono modificabili dal relativo campo; sbloccando l’esercizio puoi tornare a modificarle. Se annulli il completamento di una serie, l’esercizio torna incompleto.
 
-- screen state (popup, selected day, etc.).
+### Campi modificabili
 
-Storage limits: 30 programs in the catalog, approximately 100-200 workouts in history, 50 sessions per exercise.
+| Tipo | Kg | Ripetizioni |
+| --- | --- | --- |
+| Fondamentale con prescrizione fissa | Prescritti. | Prescritte. |
+| Fondamentale con MAV/RPE | Modificabili secondo il blocco. | Fisse quando indicate. |
+| Blocco dipendente da MAV/top set | Calcolati dal riferimento. | Secondo la prescrizione. |
+| Complementare | Generalmente modificabili. | Generalmente modificabili, con eventuale obiettivo. |
+| Monolaterale | Separati per lato. | Separate per lato. |
 
-`localStorage` is limited to a few MB. If saving fails (full storage), the app shows a warning once: download a backup from the Plan right away.
+Nei complementari l’app può proporre valori dell’ultima esecuzione dello stesso esercizio, anche da una scheda diversa. I valori già inseriti non vengono sovrascritti dal riempimento automatico. I suggerimenti mostrati nei campi possono essere accettati quando completi la serie.
 
-### Backup
+### Esercizi monolaterali
 
-**Plan > Download data backup (.json)** saves the whole app state in one file (`powerlifting-backup-YYYY-MM-DD.json`). On iPhone, downloads from the installed app may not work; if so, use the CSV export from History.
+Ogni serie contiene **Sinistro** e **Destro**. Puoi completare un lato alla volta oppure tutta la serie con il pulsante dedicato. La serie è completa quando entrambi i lati sono fatti; anche lo storico mantiene i valori separati.
 
-**Plan > Restore backup (.json)** loads a backup file: it asks for confirmation, then asks whether to download a backup of the current data first, replaces **all** current data and reloads the app. A file that is not a backup of this app is rejected without changing anything. Backups made before the per-exercise log existed are migrated automatically on reload (see below). Open-popup state (day prompt, rest picker, accessories draft, plan popup) is not restored.
+### Fine allenamento
 
-On startup the app also discards the purely visual popups (day prompt, day editor, rest picker); the accessories draft and the plan popup are kept because they hold data you typed.
+Concludendo la sessione, l’app salva serie, carichi e note, aggiorna lo storico per esercizio e ricostruisce il Piano. Il completamento di tutti i giorni permette il passaggio alla settimana successiva; l’ultima settimana viene segnalata come conclusa.
 
-### Data migration (schema v2)
+Il comando per terminare comunque permette di chiudere anche una sessione incompleta. Un allenamento iniziato prima di mezzanotte può rimanere aperto fino a 12 ore ed essere associato al giorno di inizio.
 
-On the first launch after updating to the per-exercise log, the app migrates the old data automatically:
+## Note, foto e link
 
-1. it offers to download a backup first;
-2. it converts the workout history and the old per-exercise load history into the new per-exercise log (unilateral sides included);
-3. it moves the in-progress logs, notes and “next time” plans of the current program to the new keys;
-4. it moves the rest times to the new exercise identifiers.
+Ogni esercizio può contenere testo, foto e link HTTP/HTTPS, compresi collegamenti a video.
 
-If anything fails, the previous data is restored. The migration can be repeated safely. The old load history (`liftHistory`) is left in place but no longer read.
+- **Testo:** viene salvato nella sessione dell’esercizio.
+- **Foto:** usa **＋ Foto nelle note** e seleziona una o più immagini. Vengono compresse sul dispositivo, con lato massimo di 1600 pixel; il limite per il file originale è 25 MB.
+- **Link:** usa **＋ Link video** oppure inserisci l’indirizzo nel testo. I collegamenti vengono mostrati anche come link cliccabili.
+- **Visualizzazione foto:** tocca una miniatura per aprirla interamente dentro l’app. Usa **Chiudi**, tocca lo sfondo o premi Esc per tornare all’allenamento.
 
-Clearing site data resets everything on that device: export the CSV first. On the server (Redis), only push subscriptions remain.
+### Note delle settimane precedenti
 
----
+Sotto l’esercizio, **Note degli allenamenti precedenti** raccoglie testo, link e foto delle sessioni salvate dello stesso esercizio. La registrazione più recente è aperta; le altre si possono espandere.
 
-## Project structure
+La sessione corrente e le settimane successive della stessa scheda sono escluse da questa raccolta. Le note precedenti restano associate alla loro registrazione: visualizzarle durante una nuova sessione non le copia nel nuovo campo di testo.
 
-```
-├── index.html          # HTML shell + PWA meta
-├── script.js           # App logic (program, UI, logging, timer, CSV, client push)
-├── style.css           # Styles (light/dark theme)
-├── coach.jpg           # Home image, app icon and notification image
-├── sw.js               # Service Worker (push and notification click)
-├── manifest.json       # “Add to Home Screen” installation
-├── package.json        # Node dependencies (web-push, @upstash/redis)
-├── vercel.json         # Cron and service worker headers
-├── README.md
-├── tests/              # Automated tests, sample programs, old-format state (see below)
-└── api/
-    ├── subscribe.js    # Save/remove the push subscription
-    ├── cron.js         # Send scheduled notifications
-    └── vapid.js        # Expose the public VAPID key to the client
-```
+Foto e link sono consultabili anche nello **Storico**. Il pulsante **Modifica note** dello storico consente di aggiornare il testo di una registrazione passata.
 
-Note: the service worker only handles notifications; it does not cache the files, so the app **does not work offline**.
+## Carico per la prossima volta
 
----
+Nei complementari puoi attivare **Modificare il carico la prossima volta?** e impostare:
 
-## Vercel deployment
+- il prossimo carico in kg;
+- carichi separati per sinistro e destro, quando previsti;
+- una nota facoltativa.
 
-### 1. Repository
+L’impostazione viene salvata automaticamente nella sessione e, alla sua registrazione, associata allo storico dell’esercizio. Nella sessione successiva l’app consulta il piano presente nell’ultima esecuzione disponibile.
 
-1. Create a GitHub repo and upload **the entire folder**.
+Il riquadro **Avevi programmato…** mostra il carico e l’eventuale nota. **Applica a tutte** è disposto sotto al testo e applica il valore alle serie modificabili non ancora completate.
 
-2. Go to [vercel.com](https://vercel.com) > **Add New Project** > import the repo.
+## Recuperi e timer iPhone
 
-3. Deploy with the default settings.
+Ogni esercizio ha un recupero personalizzabile: predefinito **2 minuti**, intervallo **15 secondi–10 minuti**. La durata viene ricordata per esercizio.
 
-### 2. Upstash Redis (for notifications)
+Il recupero parte dal pulsante dedicato oppure completando una serie o un lato monolaterale. La barra mostra esercizio e tempo rimanente; **Annulla** interrompe il recupero interno dell’app.
 
-1. In the Vercel project > **Storage** > **Marketplace** > **Upstash** (Redis or KV).
+Nelle preferenze puoi gestire barra, pulsante di annullamento, suono, notifica, promemoria di recupero dimenticato e riepilogo iniziale. Il promemoria funziona mentre l’app è aperta e al rientro: non equivale a un timer di sistema in background.
 
-2. Connect it to the project.
+### Timer di sistema su iPhone
 
-3. Verify that variables such as `KV_REST_API_URL` / `UPSTASH_REDIS_REST_URL` and `KV_REST_API_TOKEN` / `UPSTASH_REDIS_REST_TOKEN` appear. The code accepts both prefixes.
+Con l’opzione attiva in **Piano**, l’avvio del recupero richiama il comando rapido chiamato esattamente **Recupero PL**, passando la durata in secondi.
 
-### 3. VAPID keys
+Configurazione essenziale in Comandi:
+
+1. Crea un comando con nome **Recupero PL**.
+2. Usa l’input del comando rapido come durata dell’azione di avvio timer.
+3. Imposta l’unità in **secondi** e autorizza l’esecuzione quando richiesto.
+
+**Annullare il recupero nell’app non annulla il timer iPhone e non richiama il comando rapido di arresto.** Per fermare il timer di sistema usa i controlli dell’iPhone. La vecchia diramazione del comando per input vuoto, se già presente, non viene richiamata da questo pulsante.
+
+Il timer interno usa un orario di scadenza per riallineare il conto alla riapertura. Se è scaduto da oltre due minuti, viene scartato senza un avviso tardivo. Suono e notifiche del browser dipendono dai permessi e dalla gestione del background del dispositivo.
+
+## Storico e scambio dei dati
+
+### Visualizzazione
+
+Gli allenamenti sono raggruppati per scheda, con quella attuale per prima. I dettagli restano **sempre aperti**: esercizi, serie, kg, ripetizioni, lati, note e foto.
+
+La data è piccola, orizzontale e posizionata sopra al pulsante **X**. I riposi hanno una scheda dedicata. Le registrazioni vuote dal Piano sono indicate come prive del dettaglio serie.
+
+L’eliminazione richiede conferma e aggiorna anche il Piano e il registro per esercizio.
+
+### Registro per esercizio
+
+Il registro degli esercizi è condiviso tra schede riconosciute e conserva fino a **50 sessioni per esercizio**. La riga **Volta scorsa** mostra l’esecuzione precedente, escludendo quella corrente.
+
+Le sessioni della scheda sono identificate da programma, settimana e giorno; i dati delle serie in corso includono anche l’identità dell’esercizio. Schede diverse con gli stessi nomi di settimana non devono condividere accidentalmente i dati della sessione.
+
+### Esportazione e importazione
+
+| Formato | Uso |
+| --- | --- |
+| CSV storico dell’app | Esportazione delle serie e reimportazione in una scheda conosciuta. |
+| CSV per Hevy, formato Strong | Trasferimento delle serie eseguite con valori registrati; l’importazione dipende dall’app di destinazione. |
+| CSV Hevy/Strong per complementari extra | Lettura di una sessione esterna da registrare come complementari. |
+| JSON di backup | Copia completa dello stato, comprese le foto. |
+| DOCX | Esportazione del programma di allenamento. |
+
+L’importazione dello storico richiede almeno `week`/`settimana`, `day`/`giorno` ed `exercise`, e deve corrispondere a una scheda presente nell’app. Puoi aggiungere registrazioni oppure sostituire lo storico; per sostituirlo, il CSV deve includere tutte le schede già presenti.
+
+Il CSV nativo gestisce i valori separati dei monolaterali. Il CSV **non sostituisce il backup JSON**: non conserva la copia completa dello stato e delle foto.
+
+### Complementari extra
+
+Da **Oggi → Allenamento → Complementari**, oppure dal Piano, puoi registrare una sessione fuori scheda. La tabella raccoglie esercizio, serie, ripetizioni, kg e note, con possibilità di aggiungere o eliminare righe.
+
+L’import CSV può leggere allenamenti Hevy, Strong o esportati dall’app; se contiene più sessioni, puoi scegliere quella da usare. Le righe consecutive dello stesso esercizio vengono raggruppate.
+
+## Modifica della scheda
+
+Le modifiche in **Programma** rimangono in una **bozza** fino a **Applica**. Oggi continua a usare il programma applicato.
+
+| Area | Operazioni |
+| --- | --- |
+| Giorno | Modificare esercizi, prescrizioni, classificazione, note e ordine. |
+| Matrice | Confrontare e modificare le prescrizioni tra settimane. |
+| Statistiche | Consultare stime di volume e durata. |
+| Strumenti | Copiare giorni/settimane, generare progressioni, applicare scarico, gestire versioni ed esportare. |
+
+Nell’editor puoi scegliere l’ambito delle modifiche, aggiungere o rimuovere esercizi e costruire prescrizioni per blocchi. Gli strumenti consentono anche di duplicare o rinominare una scheda, crearne una vuota o ripristinare il programma del coach.
+
+L’app mantiene la base originale del coach e versioni delle modifiche applicate. Reimportando un aggiornamento della stessa scheda, tenta di riapplicare le modifiche locali e chiede come gestire gli eventuali conflitti.
+
+Le registrazioni completate restano storiche; i dati di sessione incompatibili con prescrizioni cambiate vengono conservati nell’archivio mostrato nelle preferenze. Le statistiche sono stime ricavate dalle notazioni riconosciute.
+
+## Salvataggio e backup
+
+I dati risiedono nel browser o nella PWA del dispositivo:
+
+| Archivio | Contenuto |
+| --- | --- |
+| `localStorage`, chiave `powerapp_v1` | Schede, massimali, serie, storico, note testuali, riferimenti alle foto, piani di carico e preferenze. |
+| IndexedDB, database `powerapp_media_v1` | Immagini delle note compresse sul dispositivo. |
+| Server delle notifiche, se configurato | Sottoscrizioni push. |
+
+Lo storico generale non viene troncato automaticamente a 100–200 allenamenti. Il registro sintetico per esercizio ha invece il limite di 50 sessioni; resta inoltre il limite di spazio disponibile nel browser.
+
+Non è prevista una sincronizzazione automatica degli allenamenti tra dispositivi. Cambiare dominio, profilo browser o dispositivo richiede un trasferimento tramite backup.
+
+### Creare e ripristinare un backup
+
+**Piano → Scarica backup dati (.json)** produce `powerlifting-backup-YYYY-MM-DD.json` con stato e immagini incorporate. Il backup corrente usa `backupVersion: 3`.
+
+**Piano → Ripristina backup (.json)** richiede conferma e sostituisce lo stato attuale con quello del file. Le immagini vengono ripristinate con nuovi identificatori per evitare di sovrascrivere quelle esistenti durante il trasferimento. I popup non vengono riaperti dal backup.
+
+Se una foto necessaria manca dall’archivio locale, l’esportazione segnala l’errore. Se il download non riesce dalla PWA, prova ad aprire il sito nel browser che contiene i dati e ripeti il backup.
+
+Cancellare i dati del sito elimina anche gli archivi locali. Prima di farlo, scarica un backup completo. In caso di spazio esaurito, l’app mostra un avviso di salvataggio.
+
+### Migrazione dei dati precedenti
+
+Il passaggio allo schema v2 migra il vecchio registro degli esercizi, le chiavi delle sessioni e i tempi di recupero. Prima della migrazione può essere proposto un backup. Lo schema dello stato e la versione del formato di backup sono due numerazioni distinte.
+
+## Struttura e avvio locale
+
+Il frontend non richiede una compilazione: HTML, CSS e JavaScript sono serviti come file statici.
+
+| File o directory | Ruolo |
+| --- | --- |
+| `index.html` | Pagina iniziale, caricamento di script/stile e registrazione del service worker. |
+| `script.js` | Import, interfaccia, allenamenti, parser, note, foto, timer, editor e scambio dati. |
+| `style.css` | Layout, temi e adattamento ai dispositivi. |
+| `manifest.json` | Metadati per l’installazione PWA. |
+| `sw.js` | Gestione delle notifiche e della loro apertura, secondo la configurazione del progetto. |
+| `coach.jpg` | Immagine e icona richiamate dall’app. |
+| `api/vapid.js` | Endpoint della chiave pubblica push. |
+| `api/subscribe.js` | Gestione delle sottoscrizioni push. |
+| `api/cron.js` | Invio dei promemoria dal server. |
+| `package.json`, `vercel.json` | Dipendenze e configurazione del progetto completo. |
+
+Il pacchetto delle correzioni frontend contiene `index.html`, `script.js` e `style.css`: gli altri file vanno conservati dal progetto originale.
+
+### Solo interfaccia
+
+Nella cartella con i file dell’app:
 
 ```bash
-npx web-push generate-vapid-keys
+python3 -m http.server 8000
 ```
 
-Copy the **Public Key** and **Private Key**.
+Apri `http://localhost:8000`. Le API push non sono fornite da questo server statico. Per la lettura DOCX serve anche il caricamento di JSZip.
 
-### 4. Environment variables
+### Progetto completo
 
-Vercel > project > **Settings** > **Environment Variables** (Production):
-
-| Name | Value |
-|------|--------|
-| `VAPID_PUBLIC_KEY` | Generated Public Key |
-| `VAPID_PRIVATE_KEY` | Generated Private Key |
-| `VAPID_SUBJECT` | `mailto:your-email@example.com` |
-| `CRON_SECRET` | Long random string (e.g. `openssl rand -hex 32`) |
-
-Then **Redeploy**.
-
-### 5. Install the app on the phone
-
-**iPhone (Safari)**
-
-1. Open the site URL in Safari.
-
-2. Share > **Add to Home Screen**.
-
-3. Open it **from the icon** (not from a Safari tab).
-
-4. **Plan** > **Enable notifications** > allow.
-
-**Android (Chrome)**
-
-1. Open the URL > menu > **Install app** / Add to Home Screen.
-
-2. **Plan** > **Enable notifications**.
-
-### 6. Cron schedules
-
-| Cron | UTC | Italy (daylight saving time) |
-|------|-----|---------------------------|
-| `0 5 * * *` | 05:00 | about 07:00 |
-| `0 6 * * *` | 06:00 | about 08:00 |
-
-On Vercel's Hobby plan, cron starts “within that hour”.
-
----
-
-## Local development and tests
+Se hai anche `package.json`, API e configurazione Vercel:
 
 ```bash
 npm install
-
 npx vercel dev
 ```
 
-The environment variables are required (also in `.env`) and Redis is required if you test push notifications. To test only the interface and program, you can serve the static files with a local server, but the `/api/*` APIs require Vercel (or an equivalent Node setup).
+Per le API servono le relative variabili d’ambiente. L’installabilità PWA non garantisce il funzionamento offline: questo dipende dalle strategie di cache effettivamente presenti in `sw.js`.
 
-### Tests
+## Notifiche e pubblicazione
 
-The `tests/` folder (Node 18+, uses jsdom, no browser needed) contains:
+Da **Piano** puoi attivare/disattivare le notifiche ed eseguire una prova. Il client usa `/api/vapid` e `/api/subscribe`; l’invio pianificato richiede il backend del progetto e un servizio di pianificazione configurato.
 
-| File | Purpose |
-|------|---------|
-| `test-unit-migrazione.js` | Migration of old data, exercise recognition, unilateral/bilateral conversion, double save, program switching with identical week names, program recognition |
-| `test-bugfix.js` | Regression tests for bugs found in review: names with apostrophes/quotes in the rest-timer buttons, new program with the same file name not inheriting completed days, unilateral sets in the CSV round-trip, expired rest timer on app open, `window.focus` not overwritten |
-| `test-extra.js` | Shared rest-timer tick, week ordering with repeated numbers, workout crossing midnight (kept open and logged with the start date), popups not restored on startup, backup restore (valid, cancelled, invalid and broken files) |
-| `test-programma.js` | Program editor: ids, scopes, blocks, draft/apply/versions, reorder, add/delete/move, substitution, history on rename, locked weeks, statistics and checks, tools, notes, re-import merge with conflicts, `.docx` export round-trip, new/duplicate program |
-| `test-e2e-ui.js` | Imports a real `.docx`, logs a workout, switches program, checks the rendered “Last time” line and prefill, and smoke-tests the Plan popup and History |
-| `schede-esempio/*.docx` | Sample programs: base, same file re-downloaded `(1)`, similar program with a different file name (triggers the question), completely different program |
-| `stato-vecchio.json` | App state in the old format, to try the migration (`localStorage.setItem('powerapp_v1', '<file contents>')` before updating) |
-| `genera-schede.js`, `genera-stato-vecchio.js` | Regenerate the sample files |
+La configurazione del progetto completo descritta nel README precedente utilizza Vercel, Web Push e Redis/Upstash. Prima del deploy verifica i file server e i nomi delle variabili richiesti dalla versione del backend in uso.
 
-```bash
-cd tests
-npm install
-npm test            # APP_DIR=/path/to/app npm test if the tests are not inside the app folder
-```
+| Variabile | Uso previsto nel progetto |
+| --- | --- |
+| `VAPID_PUBLIC_KEY` | Chiave pubblica Web Push. |
+| `VAPID_PRIVATE_KEY` | Chiave privata Web Push, solo server. |
+| `VAPID_SUBJECT` | Contatto del mittente, per esempio un indirizzo `mailto:`. |
+| `CRON_SECRET` | Protezione dell’endpoint dei promemoria. |
+| Variabili Redis/Upstash | Accesso all’archivio delle sottoscrizioni, secondo il backend. |
 
-Expected output: `passati 45 falliti 0`, then `passati 11 falliti 0` and `smoke passati 13 falliti 0`, then `bugfix passati 20 falliti 0`, `extra passati 22 falliti 0` and `programma passati 108 falliti 0`. See `tests/README-TEST.md` for the manual test steps on the phone.
+L’orario effettivo dei promemoria dipende dalla configurazione del cron. Non è fissato dal solo frontend. Le pianificazioni UTC richiedono attenzione al passaggio tra ora solare e ora legale italiana.
 
----
+Toccando una notifica, i parametri `?prompt=1` o `?from=notif` permettono al client di aprire la scelta del giorno. Il popup può comparire anche al primo accesso della giornata se questa non è stata registrata.
 
-## Troubleshooting
+Le sottoscrizioni push non costituiscono un account di sincronizzazione degli allenamenti.
 
-| Problem | What to check |
-|----------|------------------|
-| File cannot be selected | Only `.docx`, not PDF |
-| “No table with weeks found” | SETT / GIORNO structure in Word |
-| Import does not start | JSZip is loaded from cdnjs: an internet connection is required |
-| Kg are not calculated for an exercise | The name is not recognized as a main lift, or the % is “del ...” / MAV |
-| CSV import rejected | CSV must contain `week`, `day`, `exercise`, and the weeks must exist in a known program |
-| CSV replacement rejected | CSV does not contain all programs already in History: export the complete history first or choose ADD |
-| iPhone notifications | App added to Home Screen and opened from the icon |
-| Cron does not run | `CRON_SECRET`, Redis, Vercel Functions logs |
-| Timer cannot be heard | Vibration is only supported on some devices; keep the screen active and volume turned up |
-| The rest timer does not beep after reopening the app | By design: if the timer expired more than 2 minutes ago, it is silently discarded instead of ringing late |
-| I edited the program but Today still shows the old one | Changes stay in a **draft** until you press **Apply** in the Program tab |
-| After loading the coach's new file my edits are gone | They are re-applied only if the file is recognized as the same program; otherwise it is a new program. Use **Versioni** (Program > Strumenti) to go back to the version saved before the import |
-| The export `.docx` cannot be read back | The importer needs at least two week columns (`SETT x.y`) |
-| Plan dots are “wrong” | Plan follows History: check the entries or re-import the CSV |
-| The app asks “Is it the same exercise as …?” | Normal for names that are only moderately similar; the answer is remembered. To fix a wrong answer, use `mergeExercises(fromId, toId)` from the console |
-| The app asks “Update of the same program or a new one?” | The file name and the exercises only partly match a known program. OK = same program (logs kept), Cancel = new program |
-| “Last time” is not shown for an exercise | The name is not recognized as the same exercise (modifier or equipment differs, e.g. “presa stretta”, dumbbell vs barbell) or no session was saved yet |
-| “Unable to save data” warning | Browser storage is full: download the backup from the Plan and export the History CSV |
+## Aggiornamento dei file
 
----
+1. Scarica un backup dei dati dall’app.
+2. Estrai il pacchetto e sostituisci i file frontend con i nomi **`index.html`**, **`script.js`** e **`style.css`**.
+3. Conserva manifest, service worker, immagini, API e configurazione già presenti nel progetto.
+4. Pubblica l’aggiornamento e ricarica l’app.
 
-## Notes
+Le versioni nei riferimenti `script.js?v=…` e `style.css?v=…` aiutano a richiedere i file aggiornati. Per mantenere l’accesso ai dati locali usa lo stesso indirizzo e lo stesso ambiente browser/PWA.
 
-Personal project for use with the coach's program. There is no direct integration with paid workout-log services: history is internal to the app, with CSV export/import compatible with Hevy and Strong for reading.
+## Problemi frequenti
+
+| Problema | Controllo o soluzione |
+| --- | --- |
+| Il documento non viene importato | Usa `.docx` e verifica tabelle, intestazioni SETT e righe GIORNO. |
+| JSZip non è disponibile | Controlla la connessione e l’accesso al CDN. |
+| Il carico non viene calcolato | Controlla classificazione, massimale e riferimento della percentuale. |
+| Un blocco dipendente non si completa | Registra prima il MAV o il top set da cui dipende. |
+| Oggi mostra ancora la vecchia prescrizione | Applica la bozza in Programma. |
+| Le note precedenti non compaiono | Verifica che l’allenamento sia salvato e l’esercizio riconosciuto; la sessione corrente e le settimane future della stessa scheda sono escluse. |
+| Una foto non è disponibile | Serve il database immagini del dispositivo oppure un backup completo con le foto. Il CSV non le contiene. |
+| Il timer iPhone continua dopo Annulla | È il comportamento previsto: fermalo dai controlli di sistema dell’iPhone. |
+| Il recupero del browser non suona in background | Controlla permessi e volume; su iPhone configura il timer di sistema. |
+| I dati non compaiono su un altro dispositivo | Trasferiscili con il backup JSON. |
+| Gli indicatori del Piano sembrano errati | Controlla le registrazioni nello Storico, da cui il Piano viene ricostruito. |
+| L’interfaccia mostra ancora la versione precedente | Ricarica l’app e verifica di aver pubblicato insieme HTML, script e CSS aggiornati. |
+| Compare un avviso di spazio esaurito | Scarica il backup prima di cancellare dati o effettuare altre modifiche. |
+| Le notifiche non funzionano | Verifica permessi, apertura dalla Home su iPhone e configurazione delle API. |
+
+## Verifica delle modifiche
+
+Per una verifica funzionale controlla importazione DOCX, completamento singolo e totale degli esercizi, monolaterali, sblocco, note nelle settimane successive, apertura foto, annullamento del recupero, backup/ripristino e import/export CSV.
+
+Il README precedente elencava una suite nella cartella `tests/`. Se presente nel repository completo, consulta il relativo `tests/README-TEST.md` per dipendenze e comandi. Questo documento non certifica l’esecuzione di quella suite né risultati numerici dei test.
