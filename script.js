@@ -374,7 +374,10 @@ function pianoSaveEmpty() {
   addTrainMarkToStorico(week, wd, dayNum);
   rebuildPianoFromStorico();
   const wObj = S.prog && S.prog.weeks.find(x => x.label === week);
-  if (dayNum !== 'comp' && wObj && !remaining(wObj).length) advanceCompletedWeek(week);
+  if (dayNum !== 'comp' && wObj && !remaining(wObj).length) {
+    const idx = S.prog.weeks.findIndex(x => x.label === week);
+    if (idx >= 0 && idx < S.prog.weeks.length - 1 && S.wi === idx) S.wi = idx + 1;
+  }
   if (wd === weekdayMon0() && week === (W() && W().label)) {
     S.today = { date: dstr(), type: 'rest', finished: 1, week, day: dayNum };
   }
@@ -2128,33 +2131,53 @@ function saveSessionLogs(week, day, exercises) {
 }
 /* ===== Note per esercizi e pianificazione carico prossima sessione ===== */
 function getExNoteKey(week, day, i) { return exCurProgId() + '|' + week + '|' + day + '|' + accSlot(week, day, i); }
-/** Esercizio segnato come completato nella sessione (stessa chiave usata da tg()). */
-function isExerciseCompleted(week, day, i) {
-  const a = S.chk && S.chk[week + '|' + day];
-  return !!(a && a.includes(i));
-}
-/** Note bloccate: esercizio finito (non negli inserimenti di allenamenti passati, dove non si può togliere il completamento). */
-function isExNoteLocked(week, day, i) {
-  return !isPastEntry() && isExerciseCompleted(week, day, i);
-}
-/** Note salvate l'ultima volta per lo stesso esercizio (qualsiasi scheda), esclusa la sessione corrente. */
-function inheritedExNote(week, day, i) {
-  const e = sessionExercise(week, day, i);
-  if (!e || e.warm || !e.name) return '';
-  const prev = lastExEntry(e.name, week, day);
-  return (prev && prev.note) || '';
-}
 function getExNote(week, day, i) {
-  const key = getExNoteKey(week, day, i);
-  if (S.exNotes && Object.prototype.hasOwnProperty.call(S.exNotes, key)) return S.exNotes[key] || '';
-  // Prima apertura in questa sessione: parte dalle note dell'ultima volta, ma come COPIA propria della sessione.
-  if (isPastEntry()) return '';
-  const inherited = inheritedExNote(week, day, i);
-  if (inherited) { S.exNotes = S.exNotes || {}; S.exNotes[key] = inherited; }
-  return inherited;
+  return (S.exNotes && S.exNotes[getExNoteKey(week, day, i)]) || '';
+}
+function noteTextHtml(text) {
+  const re = /https?:\/\/[^\s<>"']+/g;
+  let html = '', start = 0;
+  for (const match of String(text || '').matchAll(re)) {
+    html += esc(String(text).slice(start, match.index));
+    html += '<a href="' + esc(match[0]) + '" target="_blank" rel="noopener noreferrer">' + esc(match[0]) + '</a>';
+    start = match.index + match[0].length;
+  }
+  return html + esc(String(text || '').slice(start));
+}
+function previousExerciseNotesHtml(week, day, i, exercise) {
+  const cur = exCur(week, day), items = [], seen = new Set();
+  const weeks = (S.prog && S.prog.weeks) || [];
+  const currentIndex = weeks.findIndex(w => w.label === week);
+  const eligible = w => {
+    if (exSameSession(w, cur)) return false;
+    if (String(w.progId) === String(exCurProgId())) {
+      const index = weeks.findIndex(x => x.label === w.week);
+      if (index >= 0 && currentIndex >= 0 && index > currentIndex) return false;
+    }
+    return !w.date || w.date <= (cur.date || dstr());
+  };
+  const add = (w, note, key) => {
+    if (!eligible(w) || (!note && !(S.noteImages && S.noteImages[key] && S.noteImages[key].length))) return;
+    const id = [w.progId, w.week, w.day, w.date].join('|');
+    if (seen.has(id)) return;
+    seen.add(id); items.push({ w, note, key });
+  };
+  const ordinal = Number((accSlot(week, day, i).match(/#(\d+)$/) || [])[1] || 0);
+  (S.workoutLog || []).forEach(w => {
+    const matches = (w.exercises || []).filter(e => getExId(e.name) === getExId(exercise.name));
+    const e = matches[ordinal];
+    if (e) add(w, e.note || '', e.noteImageKey || '');
+  });
+  exEntriesFor(exercise.name).forEach(en => add(en, en.note || '', ''));
+  items.sort((a,b) => String(b.w.date || '').localeCompare(String(a.w.date || '')));
+  if (!items.length) return '';
+  return '<details class="previous-exercise-notes" open><summary>Note degli allenamenti precedenti</summary>' + items.map(({w,note,key}, n) =>
+    '<details class="previous-note" ' + (n === 0 ? 'open' : '') + '><summary>' + esc([exFmtDate(w.date), w.week, w.day != null ? 'Giorno ' + w.day : ''].filter(Boolean).join(' · ')) + '</summary>' +
+    (note ? '<div class="note-text">' + noteTextHtml(note) + '</div>' : '') +
+    (key ? '<div class="note-gallery history-gallery" data-note-key="' + esc(key) + '"></div>' : '') + '</details>'
+  ).join('') + '</details>';
 }
 function setExNote(week, day, i, text) {
-  if (isExNoteLocked(week, day, i)) return;
   S.exNotes[getExNoteKey(week, day, i)] = String(text || '');
   const e = sessionExercise(week, day, i);
   if (e) {
@@ -2251,9 +2274,8 @@ function exNoteAndNextLoadHtml(weekLabel, day, exIndex, exercise) {
   if (!exercise || exercise.warm) return '';
   const wJs = jq(weekLabel);
   const note = getExNote(weekLabel, day, exIndex);
+  const exerciseFinished = (S.chk[weekLabel + '|' + day] || []).includes(exIndex);
   const isAcc = isAccessory(exercise);
-  const locked = isExNoteLocked(weekLabel, day, exIndex);
-  const dis = locked ? ' disabled' : '';
 
   let plannedBanner = '';
   let nextLoadSection = '';
@@ -2273,25 +2295,25 @@ function exNoteAndNextLoadHtml(weekLabel, day, exIndex, exercise) {
           <span>Avevi programmato <b>${esc(String(planned.kg))} kg</b> per questa sessione</span>
           ${planned.note ? `<span class="planned-note-hint"> — ${esc(planned.note)}</span>` : ''}
         </div>
-        <button type="button" class="planned-apply-btn"${dis} onclick='applyPlannedLoadToSets(${wJs}, ${day}, ${exIndex}, ${planned.kg})'>Applica a tutte</button>
+        <button type="button" class="planned-apply-btn" onclick='applyPlannedLoadToSets(${wJs}, ${day}, ${exIndex}, ${planned.kg})'>Applica a tutte</button>
       </div>`;
     }
 
     nextLoadSection = `<div class="next-load-section" data-ex="${esc(exercise.name)}" data-week="${esc(weekLabel)}" data-day="${esc(String(day))}">
       <label class="next-load-toggle ${activeClass}">
-        <input type="checkbox" ${planChecked}${dis} onchange="onToggleNextLoad(this)">
+        <input type="checkbox" ${planChecked} onchange="onToggleNextLoad(this)">
         <span class="toggle-pill-text">Modificare il carico la prossima volta?</span>
       </label>
       <div class="next-load-form ${plan ? '' : 'hidden'}">
         <div class="next-load-inputs">
           <label>Prossimo carico (kg)
-            <input type="number" inputmode="decimal" step="0.5" placeholder="es. 102.5"${dis} value="${esc(String(planKg))}"
+            <input type="number" inputmode="decimal" step="0.5" placeholder="es. 102.5" value="${esc(String(planKg))}"
               oninput="onNextLoadInputsChange(this)"
               onchange="onNextLoadInputsChange(this)">
           </label>
-          ${isMonolateral(exercise) ? ['L','R'].map(side => `<label>Prossimo carico ${side === 'L' ? 'sinistro' : 'destro'} (kg)<input type="number" inputmode="decimal" step="0.5" data-next-side="${side}"${dis} value="${esc(String(plan && plan.sides && plan.sides[side] && plan.sides[side].kg != null ? plan.sides[side].kg : ''))}" placeholder="Usa il carico comune" oninput="onNextLoadInputsChange(this)"></label>`).join('') : ''}
+          ${isMonolateral(exercise) ? ['L','R'].map(side => `<label>Prossimo carico ${side === 'L' ? 'sinistro' : 'destro'} (kg)<input type="number" inputmode="decimal" step="0.5" data-next-side="${side}" value="${esc(String(plan && plan.sides && plan.sides[side] && plan.sides[side].kg != null ? plan.sides[side].kg : ''))}" placeholder="Usa il carico comune" oninput="onNextLoadInputsChange(this)"></label>`).join('') : ''}
           <label>Nota (facoltativa)
-            <input type="text" class="next-load-note-input" placeholder="es. provare con cintura"${dis} value="${esc(planNote)}"
+            <input type="text" class="next-load-note-input" placeholder="es. provare con cintura" value="${esc(planNote)}"
               oninput="onNextLoadInputsChange(this)"
               onchange="onNextLoadInputsChange(this)">
           </label>
@@ -2300,11 +2322,11 @@ function exNoteAndNextLoadHtml(weekLabel, day, exIndex, exercise) {
     </div>`;
   }
 
-  return `<div class="ex-notes-wrap ${locked ? 'ex-notes-locked' : ''}"${locked ? ' aria-disabled="true"' : ''}>
-    ${locked ? '<p class="ex-notes-lock-hint">🔒 Esercizio completato · note bloccate. Annulla il completamento per modificarle.</p>' : ''}
+  return `<div class="ex-notes-wrap">
     ${plannedBanner}
+    ${previousExerciseNotesHtml(weekLabel, day, exIndex, exercise)}
     <div class="ex-note-field">
-      <textarea class="ex-note-input" placeholder="Note per questo esercizio…" rows="2"${dis}
+      <textarea class="ex-note-input" placeholder="Note per questo esercizio…" rows="2" ${exerciseFinished ? 'disabled aria-disabled="true"' : ''}
         oninput="setExNote(${wJs},${day},${exIndex},this.value)"
         onchange="setExNote(${wJs},${day},${exIndex},this.value)">${esc(note)}</textarea>
     </div>
@@ -2347,13 +2369,6 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
   const restSec = getRestSec(exercise.name);
   const mono = !main && isMonolateral(exercise);
   if (mono) log.sets.forEach(st => ensureMonoSides(st));
-  // Carico scelto con "Modificare il carico la prossima volta?" nell'ultima sessione: compare come suggerimento verde nel campo kg
-  const plannedLoad = (!main && !isPastEntry()) ? getPlannedLoad(exercise.name, weekLabel, day) : null;
-  const plannedKgFor = side => {
-    if (!plannedLoad || plannedLoad.kg == null) return '';
-    const sk = side && plannedLoad.sides && plannedLoad.sides[side] && plannedLoad.sides[side].kg != null ? plannedLoad.sides[side].kg : plannedLoad.kg;
-    return sk == null || !Number.isFinite(Number(sk)) ? '' : String(sk);
-  };
 
   return `<div class="sets-wrap ${allLocked ? 'sets-locked' : ''} ${mono ? 'sets-mono' : ''}">
     ${multiBlock ? '' : (T.mode === 'ramp' ? rampHeaderHtml(T, info, log, est, lift) : (T.mode === 'free' ? '<p class="ramp-info">Istintivo: kg e rip liberi, scegli a sensazione</p>' : ''))}
@@ -2408,12 +2423,10 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
         const fromPrev = prevSetSideKg(log, si, side.key);
         const kgV = sd.kg != null && sd.kg !== '' ? esc(String(sd.kg)) : '';
         const repV = sd.reps != null && sd.reps !== '' ? esc(String(sd.reps)) : '';
-        const plannedSide = kgV === '' ? plannedKgFor(side.key) : '';
-        const kgPh = plannedSide || fromPrev || 'kg';
-        const kgCls = plannedSide ? ' class="kg-planned"' : '';
+        const kgPh = fromPrev || 'kg';
 
         if (sideDone) return `<div class="mono-side mono-side-done" data-side="${side.key}"><div class="mono-side-label">✓ ${side.label}</div><div class="set-readonly set-done-ro"><span class="set-ro-kg">${kgV ? kgV + ' kg' : '— kg'}</span><span class="set-x">×</span><span class="set-ro-reps">${repV ? repV + ' rip' : '— rip'}</span></div><p class="set-lock-hint">Fatto · tocca per sbloccare</p></div>`;
-        return `<div class="mono-side" data-side="${side.key}"><div class="mono-side-label">${side.label} ·${fmtRest(restSec)}</div><div class="set-inputs"><input data-field="kg"${kgCls} type="number" inputmode="decimal" step="0.5" placeholder="${esc(String(kgPh))}" value="${kgV}" oninput="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','kg',this.value)" onchange="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','kg',this.value);cascadeMonoKgFromSet(${wJs},${day},${exIndex},${si},'${side.key}')"><span class="set-x">×</span><input data-field="reps" type="number" inputmode="numeric" step="1" placeholder="${prescRep != null ? prescRep : 'rip'}" value="${repV}" oninput="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','reps',this.value)" onchange="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','reps',this.value)"></div><p class="set-lock-hint">Tocca qui → fatto + recupero</p></div>`;
+        return `<div class="mono-side" data-side="${side.key}"><div class="mono-side-label">${side.label} ·${fmtRest(restSec)}</div><div class="set-inputs"><input data-field="kg" type="number" inputmode="decimal" step="0.5" placeholder="${esc(String(kgPh))}" value="${kgV}" oninput="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','kg',this.value)" onchange="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','kg',this.value);cascadeMonoKgFromSet(${wJs},${day},${exIndex},${si},'${side.key}')"><span class="set-x">×</span><input data-field="reps" type="number" inputmode="numeric" step="1" placeholder="${prescRep != null ? prescRep : 'rip'}" value="${repV}" oninput="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','reps',this.value)" onchange="setExSideLog(${wJs},${day},${exIndex},${si},'${side.key}','reps',this.value)"></div><p class="set-lock-hint">Tocca qui → fatto + recupero</p></div>`;
       }).join('');
       const pm = prevInfo && prevInfo.sets ? (prevInfo.sets[si]) : null;
       const hasV = v => v !== '' && v != null;
@@ -2452,12 +2465,11 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
       const bStart = si - (c.bpos || 0);
       const bLog = { sets: log.sets.slice(bStart, bStart + (c.bsize || log.sets.length)) };
       const bEst = multiBlock ? (prescKg != null ? prescKg : rpeTargetKg(cT, prescRep, lift)) : (prescKg != null ? prescKg : est);
-      const plannedRamp = kgVal === '' ? plannedKgFor() : '';
-      const ph = plannedRamp || rampPlaceholder(cT, cInfo, bLog, c.bpos || 0, bEst);
+      const ph = rampPlaceholder(cT, cInfo, bLog, c.bpos || 0, bEst);
       const roRepAttr = !repsEditable ? 'readonly class="ro-input" tabindex="-1"' : '';
 
       inputs = `<div class="set-inputs set-ramp">
-             <input data-field="kg"${plannedRamp ? ' class="kg-planned"' : ''} type="number" inputmode="decimal" step="0.5" placeholder="${esc(ph)}" value="${kgVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
+             <input data-field="kg" type="number" inputmode="decimal" step="0.5" placeholder="${esc(ph)}" value="${kgVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
              <span class="set-x">×</span>
              <input data-field="reps" type="number" inputmode="numeric" step="1" placeholder="${prescRep != null ? prescRep : 'rip'}" value="${repVal}" ${roRepAttr} oninput="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)">
              <span class="set-at">@</span>
@@ -2470,13 +2482,12 @@ function setsLogHtml(weekLabel, day, exIndex, exercise) {
       const fromPrev = prevSetKg(log, si);
       const kgVal = s.kg != null && s.kg !== '' ? esc(String(s.kg)) : '';
       const repVal = s.reps != null && s.reps !== '' ? esc(String(s.reps)) : (!repsEditable && prescRep != null ? String(prescRep) : '');
-      const plannedKg = kgVal === '' ? plannedKgFor() : '';
-      const kgPh = plannedKg || (fromPrev ? String(fromPrev) : 'kg');
-      const suggestNote = !plannedKg && fromPrev && (s.kg === '' || s.kg == null) ? `<p class="set-prev-hint">Suggerito serie prec.: <b>${esc(String(fromPrev))} kg</b> (placeholder)</p>` : '';
+      const kgPh = fromPrev ? String(fromPrev) : 'kg';
+      const suggestNote = fromPrev && (s.kg === '' || s.kg == null) ? `<p class="set-prev-hint">Suggerito serie prec.: <b>${esc(String(fromPrev))} kg</b> (placeholder)</p>` : '';
       const roRepAttr = !repsEditable ? 'readonly class="ro-input" tabindex="-1"' : '';
 
       inputs = `<div class="set-inputs">
-             <input data-field="kg"${plannedKg ? ' class="kg-planned"' : ''} type="number" inputmode="decimal" step="0.5" placeholder="${esc(kgPh)}" value="${kgVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
+             <input data-field="kg" type="number" inputmode="decimal" step="0.5" placeholder="${esc(kgPh)}" value="${kgVal}" oninput="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'kg',this.value);cascadeKgFromSet(${wJs},${day},${exIndex},${si})">
              <span class="set-x">×</span>
              <input data-field="reps" type="number" inputmode="numeric" step="1" placeholder="${prescRep != null ? prescRep : 'rip'}" value="${repVal}" ${roRepAttr} oninput="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)" onchange="setExSetLog(${wJs},${day},${exIndex},${si},'reps',this.value)">
            </div>${suggestNote}${prevHint}`;
@@ -3026,7 +3037,7 @@ async function imp(inp) {
     if (same && prevProg) reconcileProgramLogs(prevProg, prog);
     S.prog = prog;
     archiveProg(S.prog); // anche la nuova entra nel catalogo
-    S.wi = startWeek; markWeekSynced();
+    S.wi = startWeek;
     S.chk = {};
     if (!same) { S.today = null; S.cycleCompleted=null; cancelRestTimer(); }
     else if (S.today && S.today.type === 'train') { const aw=prog.weeks.find(w=>w.label===S.today.week); if(!aw || !dayExercises(aw,S.today.day)) { S.today=null; cancelRestTimer(); } }
@@ -3125,12 +3136,22 @@ function askDay() {
 }
 function markAllSetsDone(week, day, i, done) {
   const x = exerciseConfig(week, day, i); if (!x) return;
-  // Accept the source first so dependent blocks are computed from real values.
+  // Keep bulk completion atomic. Suggestions are accepted in order so later
+  // dependent blocks can use the values accepted from earlier sets.
+  const before = JSON.parse(JSON.stringify(x.row));
+  const key = week + '|' + day;
+  const oldChecks = [...((S.chk[key]) || [])];
+  const rollback = () => {
+    Object.assign(x.row, before);
+    S.chk[key] = oldChecks;
+    save();
+  };
   for (let si = 0; si < x.configs.length; si++) {
-    if (done !== false && !acceptSetSuggestions(week, day, i, si)) return false;
-    markSetDone(week, day, i, si, done);
+    if (done !== false && !acceptSetSuggestions(week, day, i, si)) { rollback(); return false; }
+    if (markSetDone(week, day, i, si, done) === false) { rollback(); return false; }
   }
   _pendingRestOwner = null;
+  syncExerciseDoneFromSets(week, day, i);
   return true;
 }
 function tg(i) {
@@ -3155,7 +3176,10 @@ function tg(i) {
   if (e && !e.warm) {
     const complex = parseComplexSets(e.text, blockExLift(e));
     const row = getExLog(w.label, d, i, complex.configs.length);
-    const allDone = row.sets.length > 0 && row.sets.every(s => !!s.done);
+    const allDone = complex.configs.length > 0 && complex.configs.every((_, si) => {
+      const s = row.sets[si];
+      return isMonolateral(e) ? !!(s && s.L && s.L.done && s.R && s.R.done) : !!(s && s.done);
+    });
     if (!allDone) {
       if (!confirm('Non tutte le serie risultano fatte.\nVuoi davvero segnare l\'esercizio come completato?\n(Verranno segnate fatte anche tutte le serie.)')) return;
     }
@@ -3343,7 +3367,7 @@ function oggi() {
   if (!w) return importCard();
 
   const t = S.today;
-  if (sessionHoldsWeek(t)) {
+  if (t && t.week && t.type === 'train' && !t.finished) {
     const idx = S.prog.weeks.findIndex(x => x.label === t.week);
     if (idx >= 0) S.wi = idx;
   }
@@ -3795,19 +3819,22 @@ function importWorkoutCsvFile(input) {
 
 function formatSetLine(s, idx) {
   const n = s.n != null ? s.n : (idx + 1);
-  const num = v => (v != null && v !== '') ? esc(String(v).replace('.', ',')) : '—';
-  // Valori in colonne fisse: kg × rip (@RPE). Ogni cella resta su una riga sola.
-  const vals = (sd, rpe) => '<span class="hist-set-val"><span class="hs-kg"><b>' + num(sd.kg) + '</b> kg</span><span class="hs-x">×</span><span class="hs-rep"><b>' + num(sd.reps) + '</b> rip</span><span class="hs-rpe">' + (rpe != null && rpe !== '' ? '@' + esc(String(rpe).replace('.', ',')) : '') + '</span></span>';
-  const blk = s.blockIdx != null ? '<span class="hs-blk">Blocco ' + (s.blockIdx + 1) + '</span>' : '';
-  const ser = '<span class="hs-ser">Serie ' + (s.blockSet != null ? s.blockSet : n) + '</span>';
+  const blockLabel = s.blockIdx != null ? 'Blocco ' + (s.blockIdx + 1) + ' · ' : '';
   if (s.mono || s.L || s.R) {
-    const row = (sd, lab) => {
-      sd = sd || {};
-      return '<div class="hist-set hist-set-side ' + (sd.done ? 'done' : '') + '"><span class="hist-set-n"><span class="hs-mark">' + (sd.done ? '✓' : '·') + '</span><span class="hs-side">' + lab + '</span></span>' + vals(sd, sd.rpe) + '</div>';
+    const L = s.L || {};
+    const R = s.R || {};
+    const fmt = (sd, lab) => {
+      const kg = sd.kg != null && sd.kg !== '' ? String(sd.kg).replace('.', ',') + ' kg' : '— kg';
+      const reps = sd.reps != null && sd.reps !== '' ? String(sd.reps) + ' rip' : '— rip';
+      const mark = sd.done ? '✓' : '·';
+      return `<div class="hist-set ${sd.done ? 'done' : ''}"><span class="hist-set-n">${mark} ${lab}</span><span class="hist-set-val">${esc(kg)} × ${esc(reps)}</span></div>`;
     };
-    return '<div class="hist-mono-set"><div class="hist-mono-head">' + blk + ser + '</div>' + row(s.L, 'Sx') + row(s.R, 'Dx') + '</div>';
+    return `<div class="hist-mono-set"><div class="hist-set-n" style="font-weight:800;margin:4px 0">${blockLabel}Serie ${s.blockSet != null ? s.blockSet : n}</div>${fmt(L, 'Sx')}${fmt(R, 'Dx')}</div>`;
   }
-  return '<div class="hist-set ' + (s.done ? 'done' : '') + '"><span class="hist-set-n"><span class="hs-mark">' + (s.done ? '✓' : '·') + '</span>' + blk + ser + '</span>' + vals(s, s.rpe) + '</div>';
+  const kg = s.kg != null && s.kg !== '' ? String(s.kg).replace('.', ',') + ' kg' : '— kg';
+  const reps = s.reps != null && s.reps !== '' ? String(s.reps) + ' rip' : '— rip';
+  const mark = s.done ? '✓' : '·';
+  return `<div class="hist-set ${s.done ? 'done' : ''}"><span class="hist-set-n">${mark} ${blockLabel}Serie ${s.blockSet != null ? s.blockSet : n}</span><span class="hist-set-val">${esc(kg)} × ${esc(reps)}${s.rpe != null && s.rpe !== '' ? ' @' + esc(String(s.rpe).replace('.', ',')) : ''}</span></div>`;
 }
 function storico() {
   const list = S.workoutLog || [];
@@ -3867,11 +3894,10 @@ function storico() {
     if (entryType(w) === 'rest') {
       const wdName = w.weekday != null ? WD[w.weekday] : '';
       return `<div class="card hist-workout hist-rest">
-        <div class="wk-top"><b>${esc(w.date)}</b>
+        <div class="hist-workout-head"><b class="hist-date">${esc(w.date)}</b><span class="mut">${esc(w.week)}${wdName ? ' · ' + esc(wdName) : ''}</span>
           <button class="res-btn" onclick="deleteWorkoutLog('${w.id}')">❌</button>
         </div>
-        <p class="big" style="font-size:18px;margin:6px 0">Riposo</p>
-        <p class="mut">${esc(w.week)}${wdName ? ' · ' + wdName : ''}</p>
+        <p class="hist-rest-label">Riposo</p>
       </div>`;
     }
     const exList = (w.exercises || []).filter(e => !e.warm);
@@ -3890,8 +3916,8 @@ function storico() {
       }
       let noteHtml = '';
       if (e.noteImageKey && S.noteImages && S.noteImages[e.noteImageKey] && S.noteImages[e.noteImageKey].length) noteHtml += '<div class="note-gallery history-gallery" data-note-key="' + esc(e.noteImageKey) + '"></div>';
-      if (e.note) noteHtml += `<div class="hist-ex-note"><span class="hist-note-icon">📝</span><span class="hist-ex-txt">${esc(e.note)}</span></div>`;
-      if (e.nextKg != null) noteHtml += `<div class="hist-ex-next"><span class="hist-next-icon">📌</span><span class="hist-ex-txt">Prossima volta: <b>${esc(String(e.nextKg))} kg</b>${e.nextNote ? ' — ' + esc(e.nextNote) : ''}</span></div>`;
+      if (e.note) noteHtml += `<div class="hist-ex-note note-text"><span class="hist-note-icon">📝</span> ${noteTextHtml(e.note)}</div>`;
+      if (e.nextKg != null) noteHtml += `<div class="hist-ex-next"><span class="hist-next-icon">📌</span> Prossima volta: <b>${esc(String(e.nextKg))} kg</b>${e.nextNote ? ' — ' + esc(e.nextNote) : ''}</div>`;
       return `<div class="hist-ex-block ${e.done ? 'ok' : ''}">
         <div class="hist-ex-name">${e.done ? '✓ ' : ''}${esc(e.name)}</div>
         ${setsHtml}
@@ -3902,12 +3928,13 @@ function storico() {
     }).join('');
     const dayLabel = w.day === 'comp' ? 'Complementari' : ('Giorno ' + w.day);
     return `<div class="card hist-workout">
-      <div class="wk-top"><b>${esc(w.date)}</b>
+      <div class="hist-workout-head"><b class="hist-date">${esc(w.date)}</b><span class="hist-workout-label">${esc(w.week)} · ${esc(dayLabel)}</span>
         <button class="res-btn" onclick="deleteWorkoutLog('${w.id}')">❌</button>
       </div>
-      <p class="big" style="font-size:18px;margin:6px 0">${esc(w.week)} · ${esc(dayLabel)}</p>
-      <p class="mut">${esc(w.title || '')}${tot ? ' · ' + doneN + '/' + tot + ' esercizi' : ''}</p>
-      <div class="hist-ex-list">${blocks}</div>
+      <details class="hist-workout-details">
+        <summary><span>${esc(w.title || 'Allenamento')}</span><span class="mut">${tot ? doneN + '/' + tot + ' esercizi' : 'Dettagli'}</span></summary>
+        <div class="hist-ex-list">${blocks}</div>
+      </details>
     </div>`;
   }
 
@@ -3978,7 +4005,7 @@ function piano() {
   ${trainingPreferencesHtml()}
   <h1>Timer recupero (iPhone)</h1>
   <div class="card">
-    <p class="mut" style="margin-bottom:10px">Su iPhone il timer di sistema parte <b>in automatico</b> all’avvio del recupero e si ferma con <b>Stop</b>. Suona anche a schermo spento.</p>
+    <p class="mut" style="margin-bottom:10px">Su iPhone il timer di sistema parte <b>in automatico</b> all’avvio del recupero. Annullare il recupero nell’app non interrompe il timer iPhone, che continua fino alla scadenza.</p>
     <button type="button" class="${S.restSystemTimer !== false ? 'pri' : ''}" onclick="S.restSystemTimer=!(S.restSystemTimer!==false);save();render()">
       ${S.restSystemTimer !== false ? '✓ Timer iPhone automatico attivo' : 'Timer iPhone automatico disattivo'}
     </button>
@@ -4763,7 +4790,7 @@ function pgNewProgram() {
   for (let k = 1; k <= nw; k++) { const days = {}; for (let d = 1; d <= nd; d++) days[d] = []; weeks.push({ label: 'SETT 1.' + k, n: k, days }); }
   S.prog = { id: newProgId(), name: name.trim(), fileName: name.trim() + '.docx', weeks };
   S.prog.base = pgClone(S.prog.weeks);
-  S.wi = 0; markWeekSynced(); S.chk = {}; S.today = null; S.progDraft = null; S.pgSel = null;
+  S.wi = 0; S.chk = {}; S.today = null; S.progDraft = null; S.pgSel = null;
   try { archiveProg(S.prog); } catch (e) { }
   S.view = 'programma'; save(); render();
 }
@@ -5365,12 +5392,12 @@ function acceptSetSuggestions(week, day, i, si, side) {
 function setOwner(week, day, i, si, side) { return [exCurProgId(), week, day, accSlot(week, day, i), si, side || 'both'].join('|'); }
 function markSetDone(week, day, i, setIdx, done) {
   _pendingRestOwner = null;
-  const x = exerciseConfig(week, day, i); if (!x || !x.row.sets[setIdx]) return;
+  const x = exerciseConfig(week, day, i); if (!x || !x.row.sets[setIdx]) return false;
   const st = x.row.sets[setIdx], flag = done !== false;
   const mono = isMonolateral(x.e);
   if (flag) {
-    if (mono) { if (!acceptSetSuggestions(week, day, i, setIdx, 'L') || !acceptSetSuggestions(week, day, i, setIdx, 'R')) return; }
-    else if (!acceptSetSuggestions(week, day, i, setIdx)) return;
+    if (mono) { if (!acceptSetSuggestions(week, day, i, setIdx, 'L') || !acceptSetSuggestions(week, day, i, setIdx, 'R')) return false; }
+    else if (!acceptSetSuggestions(week, day, i, setIdx)) return false;
   }
   st.done = flag;
   if (mono || st.L || st.R) { ensureMonoSides(st); st.L.done = flag; st.R.done = flag; st.done = flag; }
@@ -5378,6 +5405,7 @@ function markSetDone(week, day, i, setIdx, done) {
   if (flag) { _pendingRestOwner = owner; S.restReminder = null; }
   else cancelOwnedRest(week, day, i, setIdx);
   syncExerciseDoneFromSets(week, day, i); save();
+  return true;
 }
 
 
@@ -5386,10 +5414,8 @@ function markSetDone(week, day, i, setIdx, done) {
 function cancelRestTimer() {
   if (_systemRestLaunch) { clearTimeout(_systemRestLaunch); _systemRestLaunch = null; }
   if (_restTimer && _restTimer._iv) clearInterval(_restTimer._iv);
-  const hadSystemTimer = !!(_restTimer && _restTimer.systemStarted);
   _restTimer = null; _pendingRestOwner = null; S.restReminder = null;
   ['ends', 'name', 'owner', 'system'].forEach(k => localStorage.removeItem('powerapp_rest_' + k));
-  if (hadSystemTimer && isIosDevice() && S.restSystemTimer !== false) openSystemRestTimer('stop');
   save();
   const bar = document.getElementById('rest-bar'); if (bar) bar.remove();
 }
@@ -5400,48 +5426,11 @@ function cancelOwnedRest(week, day, i, si, side) {
   S.restReminder = null;
 }
 
-/** Completare i giorni di una settimana NON cambia più la settimana: il passaggio avviene ogni lunedì (syncWeekWithCalendar).
- *  Resta solo la segnalazione di programma concluso quando si finisce l'ultima settimana. */
 function advanceCompletedWeek(label) {
   const idx = S.prog && S.prog.weeks.findIndex(w => w.label === label);
   if (idx == null || idx < 0 || idx !== S.wi || remaining(S.prog.weeks[idx]).length) return;
-  if (idx >= S.prog.weeks.length - 1) S.cycleCompleted = { progId: exCurProgId(), date: dstr() };
-}
-
-/* ===== Settimana del programma: ogni lunedì (data locale del dispositivo) passa alla successiva ===== */
-/** Lunedì (YYYY-MM-DD, data locale) della settimana che contiene la data d. */
-function localMondayStr(d) {
-  d = d || new Date();
-  return dstr(new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7)));
-}
-/** Numero di lunedì trascorsi tra due lunedì 'YYYY-MM-DD' (aritmetica su giorni di calendario, immune all'ora legale). */
-function weeksBetweenMondays(a, b) {
-  const t = x => { const p = String(x).split('-').map(Number); return Date.UTC(p[0], p[1] - 1, p[2]); };
-  return Math.round((t(b) - t(a)) / (7 * 86400000));
-}
-/** Una sessione di allenamento aperta tiene ferma la sua settimana finché non viene chiusa. */
-function sessionHoldsWeek(t) {
-  if (!t || t.type !== 'train' || t.finished || t.week == null) return false;
-  return t.date === dstr() || (!!t.startedAt && (Date.now() - t.startedAt) < 12 * 3600 * 1000);
-}
-/** Segna la selezione corrente come allineata al calendario (dopo import/attivazione di una scheda o scelta manuale). */
-function markWeekSynced() { S.weekSyncMonday = localMondayStr(); }
-/** Allinea S.wi al calendario. Ritorna true se la settimana selezionata è cambiata. */
-function syncWeekWithCalendar() {
-  if (!S.prog || !S.prog.weeks || !S.prog.weeks.length) return false;
-  const mon = localMondayStr();
-  if (!S.weekSyncMonday) { S.weekSyncMonday = mon; save(); return false; }  // primo avvio dopo l'aggiornamento: nessun salto
-  if (S.weekSyncMonday === mon) return false;
-  if (sessionHoldsWeek(S.today)) return false;                                // si applica alla chiusura della sessione
-  const elapsed = weeksBetweenMondays(S.weekSyncMonday, mon);
-  S.weekSyncMonday = mon;
-  let changed = false;
-  if (elapsed > 0) {
-    const last = S.prog.weeks.length - 1, from = Math.min(Math.max(S.wi || 0, 0), last), to = Math.min(from + elapsed, last);
-    changed = to !== S.wi; S.wi = to;                                         // all'ultima settimana si ferma
-  }
-  save();
-  return changed;
+  if (idx < S.prog.weeks.length - 1) S.wi = idx + 1;
+  else S.cycleCompleted = { progId: exCurProgId(), date: dstr() };
 }
 function rebuildExerciseChecks() {
   if (!S.prog) return;
@@ -5549,22 +5538,27 @@ function enhanceTrainingUI() {
     const card = wrap && wrap.querySelector('.set-card'); if (!card) return;
     const week = card.dataset.week, day = Number(card.dataset.day), i = Number(card.dataset.exi);
     const key = getExNoteKey(week,day,i);
+    const locked = area.disabled;
     const box = document.createElement('div'); box.className = 'note-media'; box.dataset.noteKey = key;
-    if (field.closest('.ex-notes-locked')) {
-      const gal = document.createElement('div'); gal.className = 'note-gallery'; box.appendChild(gal); field.appendChild(box);
-      renderNoteImages(key, gal, true);
-      return;
-    }
     const label = document.createElement('label'); label.className = 'btn note-upload'; label.textContent = '＋ Foto nelle note';
     const upload = document.createElement('input'); upload.type = 'file'; upload.accept = 'image/*'; upload.multiple = true; upload.hidden = true;
-    upload.onchange = () => uploadNoteImages(key, upload); label.appendChild(upload); box.appendChild(label);
+    upload.disabled = locked;
+    upload.onchange = () => uploadNoteImages(key, upload); label.appendChild(upload); if (!locked) box.appendChild(label);
+    const links = document.createElement('div'); links.className = 'note-links';
+    const refreshLinks = () => {
+      links.replaceChildren();
+      [...new Set(area.value.match(/https?:\/\/[^\s<>"']+/g) || [])].forEach(url => {
+        const a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = url; links.appendChild(a);
+      });
+    };
+    refreshLinks(); area.addEventListener('input',refreshLinks); box.appendChild(links);
     const link = document.createElement('button'); link.type = 'button'; link.textContent = '＋ Link video'; link.onclick = () => {
       const url = prompt('Incolla il link al video (https://…)'); if (!url) return;
       try { if (!['http:','https:'].includes(new URL(url).protocol)) throw new Error(); } catch { alert('Inserisci un indirizzo http o https valido.'); return; }
-      area.value += (area.value ? '\n' : '') + url; setExNote(week,day,i,area.value);
-    }; box.appendChild(link);
+      area.value += (area.value ? '\n' : '') + url; setExNote(week,day,i,area.value); refreshLinks();
+    }; if (!locked) box.appendChild(link);
     const gallery = document.createElement('div'); gallery.className = 'note-gallery'; box.appendChild(gallery); field.appendChild(box);
-    renderNoteImages(key,gallery);
+    renderNoteImages(key,gallery,locked);
   });
   const hero = document.querySelector('.train-wrap .hero');
   if (hero && !isPastEntry()) {
@@ -5580,7 +5574,7 @@ function enhanceTrainingUI() {
     const el = document.createElement('div'); el.className = 'exercise-start-banner'; el.textContent = '✓ Programma concluso'; document.getElementById('app').prepend(el);
   }
   document.querySelectorAll('.history-gallery').forEach(g => renderNoteImages(g.dataset.noteKey,g,true));
-  document.querySelectorAll('.next-load-section').forEach(section => { if (section.closest('.ex-notes-locked')) return; const status=document.createElement('small'); status.className='next-load-status'; status.textContent='Le modifiche vengono salvate automaticamente'; section.appendChild(status); });
+  document.querySelectorAll('.next-load-section').forEach(section => { const status=document.createElement('small'); status.className='next-load-status'; status.textContent='Le modifiche vengono salvate automaticamente'; section.appendChild(status); });
   checkForgottenRest();
   updateViewport();
 }
@@ -5599,17 +5593,8 @@ if (window.visualViewport) { window.visualViewport.addEventListener('resize',upd
 document.addEventListener('focusin',updateViewport);
 document.addEventListener('focusout',() => setTimeout(updateViewport,0));
 window.addEventListener('pagehide', () => { flushSetInputsFromDOM(); });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') save(); else { updateViewport(); try { if (syncWeekWithCalendar()) render(); } catch (e) { console.error(e); } checkForgottenRest(); } });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') save(); else { updateViewport(); checkForgottenRest(); } });
 setInterval(checkForgottenRest,1000);
-// App lasciata aperta a cavallo della mezzanotte del lunedì: aggiorna la settimana senza interrompere chi sta scrivendo
-setInterval(() => {
-  try {
-    if (!S.prog || S.weekSyncMonday === localMondayStr()) return;
-    const a = document.activeElement;
-    if (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) return;
-    if (syncWeekWithCalendar()) render();
-  } catch (e) { console.error(e); }
-}, 30000);
 
 /* ===== Records: compare only completed, equivalent exercise sets ===== */
 function recordMetrics(e) {
@@ -5710,12 +5695,14 @@ async function uploadNoteImages(key,input) {
   finally { input.disabled=false; input.value=''; }
 }
 async function renderNoteImages(key,gallery,readonly) {
+  const generation = gallery._noteGeneration = (gallery._noteGeneration || 0) + 1;
+  gallery.replaceChildren();
   const images=(S.noteImages && S.noteImages[key]) || [];
   for (const ref of images) {
     try {
-      const rec=await mediaGet(ref.id); if (!gallery.isConnected) return;
+      const rec=await mediaGet(ref.id); if (!gallery.isConnected || gallery._noteGeneration !== generation) return;
       const figure=document.createElement('figure');
-      if (rec) { const a=document.createElement('a'); a.href=rec.data; a.target='_blank'; a.rel='noopener'; const img=document.createElement('img'); img.src=rec.data; img.alt=ref.name || 'Foto esercizio'; img.loading='lazy'; a.appendChild(img); figure.appendChild(a); }
+      if (rec) { const button=document.createElement('button'); button.type='button'; button.className='note-photo-open'; button.setAttribute('aria-label','Apri foto: ' + (ref.name || 'Foto esercizio')); button.onclick=ev => { ev.preventDefault(); ev.stopPropagation(); openNotePhoto(rec.data,ref.name); }; const img=document.createElement('img'); img.src=rec.data; img.alt=ref.name || 'Foto esercizio'; img.loading='lazy'; button.appendChild(img); figure.appendChild(button); }
       else { const p=document.createElement('span'); p.textContent='Foto non disponibile'; figure.appendChild(p); }
       if (!readonly) { const btn=document.createElement('button'); btn.type='button'; btn.textContent='Elimina foto'; btn.onclick=async () => {
         if (!confirm('Eliminare questa foto dalle note?')) return;
@@ -5729,6 +5716,24 @@ async function renderNoteImages(key,gallery,readonly) {
   }
 }
 
+function openNotePhoto(data,name) {
+  const previous = document.activeElement;
+  const old = document.getElementById('note-photo-viewer'); if (old) old.remove();
+  const viewer = document.createElement('div'); viewer.id='note-photo-viewer'; viewer.className='note-photo-viewer';
+  viewer.setAttribute('role','dialog'); viewer.setAttribute('aria-modal','true'); viewer.setAttribute('aria-label',name || 'Foto esercizio');
+  const close = document.createElement('button'); close.type='button'; close.className='note-photo-close'; close.textContent='Chiudi ✕';
+  const img = document.createElement('img'); img.src=data; img.alt=name || 'Foto esercizio';
+  const prevOverflow = document.body.style.overflow;
+  const dismiss = () => { viewer.remove(); document.body.style.overflow=prevOverflow; document.removeEventListener('keydown',keyHandler); if (previous && previous.isConnected) previous.focus(); };
+  const keyHandler = ev => {
+    if(ev.key==='Escape') { ev.preventDefault(); ev.stopPropagation(); dismiss(); }
+    if(ev.key==='Tab') { ev.preventDefault(); close.focus(); }
+  };
+  close.onclick=dismiss; viewer.onclick=ev => { if(ev.target===viewer) dismiss(); };
+  viewer.append(close,img); document.body.appendChild(viewer); document.body.style.overflow='hidden';
+  document.addEventListener('keydown',keyHandler); close.focus();
+}
+
 
 
 
@@ -5738,7 +5743,6 @@ function activatePendingProgram() {
   if (same) reconcileProgramLogs(old,next);
   S.prog=next; delete S.pendingProg;
   S.wi=same ? Math.min(S.wi,next.weeks.length-1) : (S.pendingStartWeek || 0); delete S.pendingStartWeek;
-  if (!same) markWeekSynced();
   S.today=null; S.chk={}; S.cycleCompleted=null;
   rebuildPianoFromStorico(); rebuildExerciseChecks();
   save();
@@ -5778,7 +5782,6 @@ function archivedDraftsHtml() {
 rebuildPianoFromStorico();
 try { migrateToV2(); } catch (e) { console.error(e); }
 try { pgInit(); } catch (e) { console.error(e); }
-try { syncWeekWithCalendar(); } catch (e) { console.error(e); }
 render();
 // Espone funzioni usate dagli onclick inline (iOS / strict)
 window.startRest = startRest;
