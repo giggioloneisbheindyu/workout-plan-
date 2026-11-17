@@ -3894,10 +3894,11 @@ function storico() {
     if (entryType(w) === 'rest') {
       const wdName = w.weekday != null ? WD[w.weekday] : '';
       return `<div class="card hist-workout hist-rest">
-        <div class="hist-workout-head"><b class="hist-date">${esc(w.date)}</b><span class="mut">${esc(w.week)}${wdName ? ' · ' + esc(wdName) : ''}</span>
+        <div class="wk-top"><b>${esc(w.date)}</b>
           <button class="res-btn" onclick="deleteWorkoutLog('${w.id}')">❌</button>
         </div>
-        <p class="hist-rest-label">Riposo</p>
+        <p class="big" style="font-size:18px;margin:6px 0">Riposo</p>
+        <p class="mut">${esc(w.week)}${wdName ? ' · ' + wdName : ''}</p>
       </div>`;
     }
     const exList = (w.exercises || []).filter(e => !e.warm);
@@ -3928,13 +3929,12 @@ function storico() {
     }).join('');
     const dayLabel = w.day === 'comp' ? 'Complementari' : ('Giorno ' + w.day);
     return `<div class="card hist-workout">
-      <div class="hist-workout-head"><b class="hist-date">${esc(w.date)}</b><span class="hist-workout-label">${esc(w.week)} · ${esc(dayLabel)}</span>
+      <div class="wk-top"><b>${esc(w.date)}</b>
         <button class="res-btn" onclick="deleteWorkoutLog('${w.id}')">❌</button>
       </div>
-      <details class="hist-workout-details">
-        <summary><span>${esc(w.title || 'Allenamento')}</span><span class="mut">${tot ? doneN + '/' + tot + ' esercizi' : 'Dettagli'}</span></summary>
-        <div class="hist-ex-list">${blocks}</div>
-      </details>
+      <p class="big" style="font-size:18px;margin:6px 0">${esc(w.week)} · ${esc(dayLabel)}</p>
+      <p class="mut">${esc(w.title || '')}${tot ? ' · ' + doneN + '/' + tot + ' esercizi' : ''}</p>
+      <div class="hist-ex-list">${blocks}</div>
     </div>`;
   }
 
@@ -4010,11 +4010,13 @@ function piano() {
       ${S.restSystemTimer !== false ? '✓ Timer iPhone automatico attivo' : 'Timer iPhone automatico disattivo'}
     </button>
     <p class="mut" style="margin-top:12px;font-size:13px;line-height:1.45">
-    <b>Setup una tantum del comando «Recupero PL» (solo per iPhone):</b><br>
-    <b>Link:</b> <a href="https://www.icloud.com/shortcuts/e507d36734d8427ebb034a577f0cec32" target="_blank" rel="noopener noreferrer" style="color:#3e8bff;font-weight:bold;text-decoration:underline;">Comando rapido</a><br>
-    1. Apri <b>il link</b> e aggiungi il comando rapido.<br>
-    2. Fine: timer impostato correttamente.
-  </p>
+      <b>Setup una tantum del comando «Recupero PL»:</b><br>
+      1. Apri <b>Comandi</b> → nome esatto: <b>Recupero PL</b><br>
+      2. Aggiungi azione <b>Se</b>: Input comando rapido <b>non contiene nessun valore</b><br>
+      3. Dentro il Se: <b>Annulla il timer attuale</b><br>
+      4. Altrimenti: <b>Avvia un timer di</b> → durata = <b>Input comando rapido</b> · <b>secondi</b><br>
+      5. Salva. Avvio manda i secondi; Stop manda input vuoto → annulla.
+    </p>
   </div>
   <h1>Settimane</h1>${S.prog.weeks.map((w, i) => `${makeEditCard(w.label)}<div class="wk ${i === S.wi ? 'cur' : ''} ${S.dayEdit && S.dayEdit.week === w.label ? 'wk-editing' : ''}" onclick="S.wi=${i};save();render()"><div class="wk-top"><b>${esc(w.label)}</b><button class="res-btn" onclick="resetWk('${w.label}', event)">❌</button></div>${weekDots(w)}</div>`).join('')}
   <p class="mut">Tocca un giorno (Lun–Dom) per impostare allenamento o riposo. Rosso = allenamento · blu = riposo · grigio = non registrato.</p>

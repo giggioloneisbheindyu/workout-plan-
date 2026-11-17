@@ -1247,19 +1247,6 @@ nav button {
   border-left-color: #30a46c;
 }
 
-/* Storico compatto: riepilogo sempre orizzontale, dettaglio espandibile */
-.hist-workout { padding: 12px; }
-.hist-workout-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.hist-workout-head .hist-date { flex: 0 0 auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.hist-workout-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: 13px; color: var(--mut); }
-.hist-workout-head .res-btn { flex: 0 0 auto; }
-.hist-rest-label { margin: 4px 0 0; font-weight: 700; }
-.hist-workout-details { margin-top: 8px; }
-.hist-workout-details > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--pill); cursor: pointer; font-size: 13px; font-weight: 700; }
-.hist-workout-details > summary > span:first-child { min-width: 0; overflow-wrap: anywhere; }
-.hist-workout-details > summary > .mut { flex: 0 0 auto; font-size: 12px; }
-.hist-workout-details[open] .hist-ex-list { margin-top: 10px; }
-
 .hist-ex-name {
   font-weight: 800;
   font-size: 15px;
