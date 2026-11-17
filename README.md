@@ -1,381 +1,529 @@
-# Scheda Powerlifting
+# Powerlifting Program
 
-Web app installabile come PWA per consultare la scheda del coach, registrare serie e carichi, gestire i recuperi e conservare lo storico degli allenamenti.
+An installable web app (PWA) for viewing your coach’s training program, logging sets and weights, managing rest periods, and keeping your workout history.
 
-Importa una scheda `.docx`, imposta i massimali e usa le quattro sezioni **Oggi**, **Piano**, **Programma** e **Storico**. La lettura del documento e la gestione degli allenamenti avvengono nel browser. Le API del progetto servono per le notifiche push.
+Import a `.docx` program, enter your maxes, and use the four tabs: **Oggi (Today)**, **Piano (Plan)**, **Programma (Program)**, and **Storico (History)**. Document parsing and workout management run in the browser. The project’s APIs handle push notifications.
 
-Documentazione aggiornata il **17 novembre 2026**.
+Documentation updated on **November 17, 2026**.
 
-## Indice
+The app’s interface is in Italian. This README uses English names and includes the original Italian labels where needed. Keep parser keywords and the iPhone shortcut name exactly as shown.
 
-- [Avvio rapido](#avvio-rapido)
-- [Le quattro sezioni](#le-quattro-sezioni)
-- [Importazione della scheda](#importazione-della-scheda)
-- [Prescrizioni e blocchi](#prescrizioni-e-blocchi)
-- [Registrazione dell’allenamento](#registrazione-dellallenamento)
-- [Note, foto e link](#note-foto-e-link)
-- [Carico per la prossima volta](#carico-per-la-prossima-volta)
-- [Recuperi e timer iPhone](#recuperi-e-timer-iphone)
-- [Storico e scambio dei dati](#storico-e-scambio-dei-dati)
-- [Modifica della scheda](#modifica-della-scheda)
-- [Salvataggio e backup](#salvataggio-e-backup)
-- [Struttura e avvio locale](#struttura-e-avvio-locale)
-- [Notifiche e pubblicazione](#notifiche-e-pubblicazione)
-- [Aggiornamento dei file](#aggiornamento-dei-file)
-- [Problemi frequenti](#problemi-frequenti)
+## Contents
 
-## Avvio rapido
+- [Quick start](#quick-start)
+- [The four tabs](#the-four-tabs)
+- [Importing a program](#importing-a-program)
+- [Prescriptions and blocks](#prescriptions-and-blocks)
+- [Logging a workout](#logging-a-workout)
+- [Notes, photos, and links](#notes-photos-and-links)
+- [Planning the next session’s weight](#planning-the-next-sessions-weight)
+- [Rest periods and the iPhone timer](#rest-periods-and-the-iphone-timer)
+- [History and data exchange](#history-and-data-exchange)
+- [Editing the program](#editing-the-program)
+- [Storage and backups](#storage-and-backups)
+- [Project structure and local development](#project-structure-and-local-development)
+- [Notifications and deployment](#notifications-and-deployment)
+- [Updating the files](#updating-the-files)
+- [Troubleshooting](#troubleshooting)
+- [Checking changes](#checking-changes)
 
-1. Apri l’app e carica la scheda del coach in formato `.docx`.
-2. In **Piano**, inserisci i massimali di squat, panca e stacco in kg.
-3. In **Oggi**, scegli allenamento o riposo; per allenarti seleziona il giorno della scheda.
-4. Registra i valori richiesti e tocca le serie quando le completi.
-5. Concludi l’allenamento per salvarlo nello **Storico** e aggiornare il **Piano**.
-6. Da **Piano**, scarica periodicamente un backup `.json`, soprattutto prima di cambiare dispositivo o cancellare dati del browser.
+## Quick start
 
-Per installare l’app su iPhone, aprila in Safari e scegli **Condividi → Aggiungi alla schermata Home**. Su Android usa il comando di installazione del browser. Per le notifiche iPhone, apri l’app dalla sua icona.
+1. Open the app and load your coach’s `.docx` program.
+2. In **Plan**, enter your squat, bench press, and deadlift maxes in kg.
+3. In **Today**, choose training or rest. For training, select a program day.
+4. Enter the required values and tap each set when you complete it.
+5. Finish the workout to save it to **History** and update the **Plan**.
+6. Regularly download a `.json` backup from **Plan**, especially before switching devices or clearing browser data.
 
-## Le quattro sezioni
+On iPhone, open the app in Safari and choose **Share → Add to Home Screen**. On Android, use the browser’s installation option. For iPhone notifications, launch the installed app from its Home Screen icon.
 
-| Sezione | Contenuto |
+## The four tabs
+
+| Tab | Contents |
 | --- | --- |
-| **Oggi** | Scelta allenamento/riposo, esercizi, serie, carichi, note e recuperi. |
-| **Piano** | Massimali, preferenze, notifiche, timer iPhone, calendario settimanale, cambio scheda e backup. |
-| **Programma** | Consultazione e modifica della scheda: giorni, matrice delle settimane, statistiche e strumenti. |
-| **Storico** | Allenamenti e riposi raggruppati per scheda, dettagli delle serie, note ed esportazione/importazione CSV. |
+| **Oggi — Today** | Training/rest selection, exercises, sets, weights, notes, and rest periods. |
+| **Piano — Plan** | Maxes, preferences, notifications, iPhone timer, weekly calendar, program switching, and backups. |
+| **Programma — Program** | Program viewing and editing: days, week matrix, statistics, and tools. |
+| **Storico — History** | Workouts and rest days grouped by program, set details, notes, and CSV export/import. |
 
-### Piano e calendario
+### Plan and calendar
 
-Ogni settimana ha sette caselle, da lunedì a domenica:
+Each week has seven cells, Monday through Sunday:
 
-| Indicatore | Significato |
+| Indicator | Meaning |
 | --- | --- |
-| Rosso con numero | Allenamento del giorno corrispondente della scheda. |
-| Rosso con `C` | Complementari extra. |
-| Rosso con spunta | Allenamento senza un giorno della scheda associato. |
-| Blu con trattino | Riposo. |
-| Grigio | Giorno non registrato. |
+| Red with a number | Workout for the corresponding program day. |
+| Red with `C` | Extra accessories. |
+| Red with a checkmark | Workout without an associated program day. |
+| Blue with a dash | Rest day. |
+| Gray | Day not recorded. |
 
-Tocca una settimana per selezionarla e un giorno per modificarlo. Puoi registrare un allenamento **con carichi e ripetizioni**, un allenamento **vuoto**, oppure un riposo. La registrazione di un allenamento passato non avvia i recuperi.
+Tap a week to select it and a day to edit its entry. You can record a workout **with weights and reps**, an **empty workout**, or a rest day. Entering a past workout does not start rest timers.
 
-Il calendario viene ricostruito dallo storico: eliminare o importare una registrazione aggiorna anche gli indicatori. Il pulsante X di una settimana ne azzera le registrazioni dopo le conferme previste.
+The calendar is rebuilt from History: deleting or importing a record also updates its indicators. A week’s X button resets its records after the required confirmations.
 
-## Importazione della scheda
+## Importing a program
 
-L’app legge i file Word `.docx` attraverso JSZip. **Il PDF non è un formato di importazione supportato.** JSZip viene caricato da cdnjs: deve essere disponibile una connessione per scaricare questa dipendenza.
+The app reads Word `.docx` files using JSZip. **PDF import is not supported.** JSZip is loaded from cdnjs, so a connection is required to download this dependency.
 
-### Struttura del documento
+### Document structure
 
-Usa tabelle Word con:
+Use Word tables with:
 
-- una riga di intestazione con almeno due colonne di settimane, per esempio `SETT 1.1` e `SETT 1.2`;
-- righe `GIORNO 1`, `GIORNO 2`, ecc. per separare i giorni;
-- una riga per esercizio, con il nome nella prima colonna e la prescrizione nelle colonne delle settimane;
-- un’unica cella di prescrizione se il testo deve valere per tutte le settimane.
+- a header row containing at least two week columns, such as `SETT 1.1` and `SETT 1.2`;
+- `GIORNO 1`, `GIORNO 2`, etc. rows to separate days;
+- one row per exercise, with its name in the first column and each week’s prescription in the following columns;
+- a single prescription cell when the same text should apply to every week.
 
-Esempio:
+Example, retaining the Italian parser keywords:
 
-| Esercizio | SETT 1.1 | SETT 1.2 |
+| Exercise | SETT 1.1 | SETT 1.2 |
 | --- | --- | --- |
 | GIORNO 1 | | |
 | Squat | 5x3s 70% | 5x3s 72.5% |
 | Curl manubri | 3x10 | 3x10 |
 
-Le settimane vengono ordinate considerando la numerazione delle etichette. Controlla dopo l’importazione i giorni, i nomi e la classificazione degli esercizi.
+Weeks are sorted using the numbering in their labels. After importing, check the days, exercise names, and exercise classifications.
 
-### Riconoscimento e cambio scheda
+### Program recognition and switching
 
-L’app confronta nome del file ed esercizi con le schede conosciute. Se il riconoscimento è parziale, chiede se si tratta di un aggiornamento della stessa scheda oppure di una nuova.
+The app compares the filename and exercises against known programs. When recognition is partial, it asks whether the file updates the same program or represents a new one.
 
-Un aggiornamento mantiene il collegamento con la scheda esistente e può riapplicare le modifiche locali. Una nuova scheda riceve una propria identità. Lo storico delle schede precedenti viene conservato.
+An update preserves the existing program association and can reapply local edits. A new program gets its own identity. Previous programs’ workout history is retained.
 
-Gli esercizi vengono riconosciuti tramite nomi normalizzati e alias. Varianti o attrezzature differenti possono avere registri distinti: per esempio panca e panca presa stretta non sono automaticamente equivalenti.
+Exercises are recognized using normalized names and aliases. Different variations or equipment may have separate logs: bench press and close-grip bench press, for example, are not automatically equivalent.
 
-## Prescrizioni e blocchi
+## Prescriptions and blocks
 
-Le percentuali dei fondamentali usano il relativo massimale, con arrotondamento dei carichi a **2,5 kg**. Percentuali riferite a MAV o ad altri valori seguono la prescrizione specifica.
+Main-lift percentages use the corresponding max, with weights rounded to **2.5 kg**. Percentages based on a MAV or another reference follow their specific prescription.
 
-| Notazione | Interpretazione |
+| Notation | Interpretation |
 | --- | --- |
-| `5x3s` | 3 serie da 5 ripetizioni: con la `s` finale l’ordine è ripetizioni × serie. |
-| `3x8` | 3 serie da 8 ripetizioni. |
-| `70%` | Percentuale del massimale, quando applicabile. |
-| `5@7` | 5 ripetizioni con obiettivo RPE 7. |
-| `10-8-6-4` | Quattro serie con ripetizioni differenti. |
-| `MAV` | Blocco di avvicinamento al carico MAV. |
-| `istintiva` | Blocco libero secondo la notazione riconosciuta. |
+| `5x3s` | 3 sets of 5 reps: with a trailing `s`, the order is reps × sets. |
+| `3x8` | 3 sets of 8 reps. |
+| `70%` | Percentage of the max, where applicable. |
+| `5@7` | 5 reps with a target RPE of 7. |
+| `10-8-6-4` | Four sets with different rep targets. |
+| `MAV` | A block working up to the MAV weight. |
+| `istintiva` | A free block, according to the recognized notation. |
 
-Le prescrizioni composte vengono separate in blocchi. Per esempio:
+Compound prescriptions are split into blocks. For example:
 
 ```text
 2x2s 70% + 5@7 + 70% no var istintiva 2x3s + istintiva
 ```
 
-| Blocco | Comportamento previsto |
+| Block | Expected behavior |
 | --- | --- |
-| `2x2s 70%` | Serie, ripetizioni e carico prescritti. |
-| `5@7` | Ripetizioni prescritte, kg modificabili e serie adattabili dove consentito. |
-| `70% no var istintiva 2x3s` | Blocco con ripetizioni e carico prescritti. |
-| `istintiva` | Kg e ripetizioni liberi. |
+| `2x2s 70%` | Prescribed sets, reps, and weight. |
+| `5@7` | Prescribed reps, editable kg, and adjustable set count where allowed. |
+| `70% no var istintiva 2x3s` | Prescribed reps and weight. |
+| `istintiva` | Free kg and reps. |
 
-Un carico che dipende da un MAV o top set richiede prima il valore del blocco di riferimento. L’RPE obiettivo della scheda non viene registrato automaticamente come RPE effettivamente percepito.
+A weight that depends on a MAV or top set requires the reference block’s value first. The program’s target RPE is not automatically saved as the actual RPE you experienced.
 
-Il parser usa regole di riconoscimento: con testi insoliti controlla l’anteprima in **Programma**. Se non riconosce il numero di serie, può usare il valore predefinito di tre serie.
+The parser uses recognition rules. For unusual text, check the preview in **Program**. If it cannot recognize the set count, it may use the default of three sets.
 
-## Registrazione dell’allenamento
+## Logging a workout
 
-### Serie e completamento
+### Sets and completion
 
-Ogni serie ha una scheda con i valori da registrare. Toccarla la segna come eseguita e avvia il recupero; toccarla di nuovo annulla il completamento e la sblocca.
+Each set has a card with the values to record. Tapping it marks the set as done and starts the rest timer. Tapping it again undoes completion and unlocks the set.
 
-Il completamento dell’esercizio si aggiorna sia segnando le serie una alla volta sia toccando numero o intestazione dell’esercizio. In quest’ultimo caso, se mancano serie, viene chiesta conferma per completarle tutte.
+Exercise completion updates both when you mark sets individually and when you tap the exercise number or heading. If some sets are unfinished, the latter action asks for confirmation before marking all of them as done.
 
-Quando tutte le serie sono completate, **l’intero esercizio si attenua**, comprese le note. Le note della sessione completata non sono modificabili dal relativo campo; sbloccando l’esercizio puoi tornare a modificarle. Se annulli il completamento di una serie, l’esercizio torna incompleto.
+When every set is complete, **the whole exercise is dimmed**, including its notes. The completed session’s note field cannot be edited until you unlock the exercise. Undoing a set’s completion also makes the exercise incomplete again.
 
-### Campi modificabili
+### Editable fields
 
-| Tipo | Kg | Ripetizioni |
+| Type | Kg | Reps |
 | --- | --- | --- |
-| Fondamentale con prescrizione fissa | Prescritti. | Prescritte. |
-| Fondamentale con MAV/RPE | Modificabili secondo il blocco. | Fisse quando indicate. |
-| Blocco dipendente da MAV/top set | Calcolati dal riferimento. | Secondo la prescrizione. |
-| Complementare | Generalmente modificabili. | Generalmente modificabili, con eventuale obiettivo. |
-| Monolaterale | Separati per lato. | Separate per lato. |
+| Main lift with a fixed prescription | Prescribed. | Prescribed. |
+| Main lift with MAV/RPE | Editable according to the block. | Fixed when specified. |
+| Block based on a MAV/top set | Calculated from the reference. | According to the prescription. |
+| Accessory | Generally editable. | Generally editable, with an optional target. |
+| Unilateral exercise | Separate for each side. | Separate for each side. |
 
-Nei complementari l’app può proporre valori dell’ultima esecuzione dello stesso esercizio, anche da una scheda diversa. I valori già inseriti non vengono sovrascritti dal riempimento automatico. I suggerimenti mostrati nei campi possono essere accettati quando completi la serie.
+For accessories, the app can suggest values from the last performance of that exercise, including a different program. Automatic prefill does not overwrite values already entered. Field suggestions can be accepted when you complete the set.
 
-### Esercizi monolaterali
+### Unilateral exercises
 
-Ogni serie contiene **Sinistro** e **Destro**. Puoi completare un lato alla volta oppure tutta la serie con il pulsante dedicato. La serie è completa quando entrambi i lati sono fatti; anche lo storico mantiene i valori separati.
+Each set contains **Sinistro (Left)** and **Destro (Right)**. Complete one side at a time or use the dedicated button to complete the entire set. A set is done when both sides are done; History also keeps their values separate.
 
-### Fine allenamento
+### Finishing a workout
 
-Concludendo la sessione, l’app salva serie, carichi e note, aggiorna lo storico per esercizio e ricostruisce il Piano. Il completamento di tutti i giorni permette il passaggio alla settimana successiva; l’ultima settimana viene segnalata come conclusa.
+Finishing saves sets, weights, and notes, updates each exercise’s log, and rebuilds the Plan. Completing every program day allows progression to the next week; the final week is marked as complete.
 
-Il comando per terminare comunque permette di chiudere anche una sessione incompleta. Un allenamento iniziato prima di mezzanotte può rimanere aperto fino a 12 ore ed essere associato al giorno di inizio.
+The option to finish anyway allows you to close an incomplete session. A workout started before midnight can remain open for up to 12 hours and be associated with its starting day.
 
-## Note, foto e link
+## Notes, photos, and links
 
-Ogni esercizio può contenere testo, foto e link HTTP/HTTPS, compresi collegamenti a video.
+Each exercise can contain text, photos, and HTTP/HTTPS links, including video links.
 
-- **Testo:** viene salvato nella sessione dell’esercizio.
-- **Foto:** usa **＋ Foto nelle note** e seleziona una o più immagini. Vengono compresse sul dispositivo, con lato massimo di 1600 pixel; il limite per il file originale è 25 MB.
-- **Link:** usa **＋ Link video** oppure inserisci l’indirizzo nel testo. I collegamenti vengono mostrati anche come link cliccabili.
-- **Visualizzazione foto:** tocca una miniatura per aprirla interamente dentro l’app. Usa **Chiudi**, tocca lo sfondo o premi Esc per tornare all’allenamento.
+- **Text:** saved with the exercise’s session.
+- **Photos:** use **＋ Foto nelle note (Add photos to notes)** and select one or more images. Photos are compressed on the device to a maximum dimension of 1600 pixels; the original file limit is 25 MB.
+- **Links:** use **＋ Link video (Add video link)** or enter the address in the note text. Addresses are also shown as clickable links.
+- **Viewing photos:** tap a thumbnail to see the entire image inside the app. Use **Chiudi (Close)**, tap the background, or press Esc to return to the workout.
 
-### Note delle settimane precedenti
+### Notes from previous weeks
 
-Sotto l’esercizio, **Note degli allenamenti precedenti** raccoglie testo, link e foto delle sessioni salvate dello stesso esercizio. La registrazione più recente è aperta; le altre si possono espandere.
+Below the exercise, **Note degli allenamenti precedenti (Notes from previous workouts)** collects text, links, and photos from saved sessions of the same exercise. The most recent record is expanded; older records can be expanded individually.
 
-La sessione corrente e le settimane successive della stessa scheda sono escluse da questa raccolta. Le note precedenti restano associate alla loro registrazione: visualizzarle durante una nuova sessione non le copia nel nuovo campo di testo.
+The current session and later weeks of the same program are excluded from this collection. Previous notes remain associated with their original records: viewing them during a new session does not copy them into the new text field.
 
-Foto e link sono consultabili anche nello **Storico**. Il pulsante **Modifica note** dello storico consente di aggiornare il testo di una registrazione passata.
+Photos and links are also available in **History**. Its **Modifica note (Edit notes)** button updates a past record’s note text.
 
-## Carico per la prossima volta
+## Planning the next session’s weight
 
-Nei complementari puoi attivare **Modificare il carico la prossima volta?** e impostare:
+For accessories, enable **Modificare il carico la prossima volta? (Change the weight next time?)** and enter:
 
-- il prossimo carico in kg;
-- carichi separati per sinistro e destro, quando previsti;
-- una nota facoltativa.
+- the next weight in kg;
+- separate left/right weights, where supported;
+- an optional note.
 
-L’impostazione viene salvata automaticamente nella sessione e, alla sua registrazione, associata allo storico dell’esercizio. Nella sessione successiva l’app consulta il piano presente nell’ultima esecuzione disponibile.
+The setting is saved automatically in the current session and attached to the exercise history when the session is recorded. In the next session, the app checks the plan saved in the latest available performance.
 
-Il riquadro **Avevi programmato…** mostra il carico e l’eventuale nota. **Applica a tutte** è disposto sotto al testo e applica il valore alle serie modificabili non ancora completate.
+The **Avevi programmato… (You had planned…)** banner shows the weight and any note. **Applica a tutte (Apply to all)** appears below the text and applies the value to editable sets that have not been completed.
 
-## Recuperi e timer iPhone
+## Rest periods and the iPhone timer
 
-Ogni esercizio ha un recupero personalizzabile: predefinito **2 minuti**, intervallo **15 secondi–10 minuti**. La durata viene ricordata per esercizio.
+Each exercise has a customizable rest period: **2 minutes** by default, with a range of **15 seconds–10 minutes**. The duration is remembered per exercise.
 
-Il recupero parte dal pulsante dedicato oppure completando una serie o un lato monolaterale. La barra mostra esercizio e tempo rimanente; **Annulla** interrompe il recupero interno dell’app.
+Start a rest period using its button or by completing a set or unilateral side. The bar shows the exercise and remaining time; **Annulla (Cancel)** stops the app’s internal rest timer.
 
-Nelle preferenze puoi gestire barra, pulsante di annullamento, suono, notifica, promemoria di recupero dimenticato e riepilogo iniziale. Il promemoria funziona mentre l’app è aperta e al rientro: non equivale a un timer di sistema in background.
+Preferences control the bar, cancel button, sound, notification, forgotten-rest reminder, and opening summary. The reminder works while the app is open and when you return; it does not provide the same background behavior as a system timer.
 
-### Timer di sistema su iPhone
+### iPhone system timer
 
-Con l’opzione attiva in **Piano**, l’avvio del recupero richiama il comando rapido chiamato esattamente **Recupero PL**, passando la durata in secondi.
+When enabled in **Plan**, starting a rest period launches an iPhone shortcut named exactly **Recupero PL**, passing the duration in seconds.
 
-Configurazione essenziale in Comandi:
+Basic setup in Shortcuts:
 
-1. Crea un comando con nome **Recupero PL**.
-2. Usa l’input del comando rapido come durata dell’azione di avvio timer.
-3. Imposta l’unità in **secondi** e autorizza l’esecuzione quando richiesto.
+1. Create a shortcut named **Recupero PL**.
+2. Use the shortcut input as the duration for the Start Timer action.
+3. Set the unit to **seconds** and authorize execution when prompted.
 
-**Annullare il recupero nell’app non annulla il timer iPhone e non richiama il comando rapido di arresto.** Per fermare il timer di sistema usa i controlli dell’iPhone. La vecchia diramazione del comando per input vuoto, se già presente, non viene richiamata da questo pulsante.
+**Canceling the rest period in the app does not cancel the iPhone timer or launch the stop shortcut.** Stop the system timer using the iPhone’s own controls. If an older shortcut contains a branch for empty input, the app’s Cancel button does not invoke that branch.
 
-Il timer interno usa un orario di scadenza per riallineare il conto alla riapertura. Se è scaduto da oltre due minuti, viene scartato senza un avviso tardivo. Suono e notifiche del browser dipendono dai permessi e dalla gestione del background del dispositivo.
+The internal timer uses an expiration timestamp to realign the countdown when the app reopens. If it expired more than two minutes ago, it is discarded without a late alert. Browser sounds and notifications depend on permissions and the device’s background restrictions.
 
-## Storico e scambio dei dati
+## History and data exchange
 
-### Visualizzazione
+### Display
 
-Gli allenamenti sono raggruppati per scheda, con quella attuale per prima. I dettagli restano **sempre aperti**: esercizi, serie, kg, ripetizioni, lati, note e foto.
+Workouts are grouped by program, with the current program first. Details remain **fully expanded**: exercises, sets, kg, reps, sides, notes, and photos.
 
-La data è piccola, orizzontale e posizionata sopra al pulsante **X**. I riposi hanno una scheda dedicata. Le registrazioni vuote dal Piano sono indicate come prive del dettaglio serie.
+The date is small, horizontal, and placed above the **X** button. Rest days have dedicated cards. Empty workouts recorded from Plan are labeled as having no set details.
 
-L’eliminazione richiede conferma e aggiorna anche il Piano e il registro per esercizio.
+Deleting a record requires confirmation and also updates the Plan and per-exercise log.
 
-### Registro per esercizio
+### Per-exercise log
 
-Il registro degli esercizi è condiviso tra schede riconosciute e conserva fino a **50 sessioni per esercizio**. La riga **Volta scorsa** mostra l’esecuzione precedente, escludendo quella corrente.
+The exercise log is shared across recognized programs and retains up to **50 sessions per exercise**. The **Volta scorsa (Last time)** line shows the previous performance, excluding the current session.
 
-Le sessioni della scheda sono identificate da programma, settimana e giorno; i dati delle serie in corso includono anche l’identità dell’esercizio. Schede diverse con gli stessi nomi di settimana non devono condividere accidentalmente i dati della sessione.
+Program sessions are identified by program, week, and day. In-progress set data also includes the exercise identity. Different programs with identical week names must not accidentally share session data.
 
-### Esportazione e importazione
+### Export and import
 
-| Formato | Uso |
+| Format | Purpose |
 | --- | --- |
-| CSV storico dell’app | Esportazione delle serie e reimportazione in una scheda conosciuta. |
-| CSV per Hevy, formato Strong | Trasferimento delle serie eseguite con valori registrati; l’importazione dipende dall’app di destinazione. |
-| CSV Hevy/Strong per complementari extra | Lettura di una sessione esterna da registrare come complementari. |
-| JSON di backup | Copia completa dello stato, comprese le foto. |
-| DOCX | Esportazione del programma di allenamento. |
+| Native History CSV | Exporting sets and importing them into a known program. |
+| Hevy CSV, Strong format | Transferring completed sets with recorded values; import support depends on the destination app. |
+| Hevy/Strong CSV for extra accessories | Reading an external session to record as accessories. |
+| JSON backup | Full state copy, including photos. |
+| DOCX | Exporting the training program. |
 
-L’importazione dello storico richiede almeno `week`/`settimana`, `day`/`giorno` ed `exercise`, e deve corrispondere a una scheda presente nell’app. Puoi aggiungere registrazioni oppure sostituire lo storico; per sostituirlo, il CSV deve includere tutte le schede già presenti.
+History import requires at least `week`/`settimana`, `day`/`giorno`, and `exercise`, and must match a program present in the app. You can add records or replace History; replacement requires the CSV to include all programs already present.
 
-Il CSV nativo gestisce i valori separati dei monolaterali. Il CSV **non sostituisce il backup JSON**: non conserva la copia completa dello stato e delle foto.
+The native CSV handles separate unilateral values. CSV **does not replace a JSON backup**: it does not preserve the complete state and photos.
 
-### Complementari extra
+### Extra accessories
 
-Da **Oggi → Allenamento → Complementari**, oppure dal Piano, puoi registrare una sessione fuori scheda. La tabella raccoglie esercizio, serie, ripetizioni, kg e note, con possibilità di aggiungere o eliminare righe.
+From **Today → Workout → Accessories**, or from Plan, you can record a session outside the program. The table collects exercise, sets, reps, kg, and notes, with options to add or remove rows.
 
-L’import CSV può leggere allenamenti Hevy, Strong o esportati dall’app; se contiene più sessioni, puoi scegliere quella da usare. Le righe consecutive dello stesso esercizio vengono raggruppate.
+CSV import can read Hevy, Strong, or this app’s exports. If a file contains several sessions, choose the one to use. Consecutive rows for the same exercise are grouped.
 
-## Modifica della scheda
+## Editing the program
 
-Le modifiche in **Programma** rimangono in una **bozza** fino a **Applica**. Oggi continua a usare il programma applicato.
+Edits in **Program** stay in a **draft** until you press **Applica (Apply)**. Today continues to use the applied program.
 
-| Area | Operazioni |
+| Area | Actions |
 | --- | --- |
-| Giorno | Modificare esercizi, prescrizioni, classificazione, note e ordine. |
-| Matrice | Confrontare e modificare le prescrizioni tra settimane. |
-| Statistiche | Consultare stime di volume e durata. |
-| Strumenti | Copiare giorni/settimane, generare progressioni, applicare scarico, gestire versioni ed esportare. |
+| Giorno — Day | Edit exercises, prescriptions, classifications, notes, and order. |
+| Matrice — Matrix | Compare and edit prescriptions across weeks. |
+| Statistiche — Statistics | View estimated volume and duration. |
+| Strumenti — Tools | Copy days/weeks, generate progressions, apply deloads, manage versions, and export. |
 
-Nell’editor puoi scegliere l’ambito delle modifiche, aggiungere o rimuovere esercizi e costruire prescrizioni per blocchi. Gli strumenti consentono anche di duplicare o rinominare una scheda, crearne una vuota o ripristinare il programma del coach.
+The editor lets you choose the scope of changes, add or remove exercises, and build prescriptions from blocks. Tools also let you duplicate or rename a program, create an empty one, or restore the coach’s program.
 
-L’app mantiene la base originale del coach e versioni delle modifiche applicate. Reimportando un aggiornamento della stessa scheda, tenta di riapplicare le modifiche locali e chiede come gestire gli eventuali conflitti.
+The app retains the coach’s original baseline and versions of applied changes. When you reimport an update to the same program, it tries to reapply local edits and asks how to handle conflicts.
 
-Le registrazioni completate restano storiche; i dati di sessione incompatibili con prescrizioni cambiate vengono conservati nell’archivio mostrato nelle preferenze. Le statistiche sono stime ricavate dalle notazioni riconosciute.
+Completed records remain historical snapshots. Session data incompatible with changed prescriptions is preserved in the archive shown in preferences. Statistics are estimates based on recognized notation.
 
-## Salvataggio e backup
+## Storage and backups
 
-I dati risiedono nel browser o nella PWA del dispositivo:
+Data is stored in the browser or installed PWA on the device:
 
-| Archivio | Contenuto |
+| Storage | Contents |
 | --- | --- |
-| `localStorage`, chiave `powerapp_v1` | Schede, massimali, serie, storico, note testuali, riferimenti alle foto, piani di carico e preferenze. |
-| IndexedDB, database `powerapp_media_v1` | Immagini delle note compresse sul dispositivo. |
-| Server delle notifiche, se configurato | Sottoscrizioni push. |
+| `localStorage`, key `powerapp_v1` | Programs, maxes, sets, history, text notes, photo references, planned weights, and preferences. |
+| IndexedDB, database `powerapp_media_v1` | Note images compressed on the device. |
+| Notification server, if configured | Push subscriptions. |
 
-Lo storico generale non viene troncato automaticamente a 100–200 allenamenti. Il registro sintetico per esercizio ha invece il limite di 50 sessioni; resta inoltre il limite di spazio disponibile nel browser.
+The overall workout history is not automatically truncated to 100–200 workouts. The compact per-exercise log has a 50-session limit; available browser storage also remains a constraint.
 
-Non è prevista una sincronizzazione automatica degli allenamenti tra dispositivi. Cambiare dominio, profilo browser o dispositivo richiede un trasferimento tramite backup.
+Workouts do not automatically sync between devices. Changing the domain, browser profile, or device requires transferring data through a backup.
 
-### Creare e ripristinare un backup
+### Creating and restoring a backup
 
-**Piano → Scarica backup dati (.json)** produce `powerlifting-backup-YYYY-MM-DD.json` con stato e immagini incorporate. Il backup corrente usa `backupVersion: 3`.
+**Plan → Scarica backup dati (.json) (Download data backup)** creates `powerlifting-backup-YYYY-MM-DD.json`, containing the state and embedded images. The current backup format uses `backupVersion: 3`.
 
-**Piano → Ripristina backup (.json)** richiede conferma e sostituisce lo stato attuale con quello del file. Le immagini vengono ripristinate con nuovi identificatori per evitare di sovrascrivere quelle esistenti durante il trasferimento. I popup non vengono riaperti dal backup.
+**Plan → Ripristina backup (.json) (Restore backup)** asks for confirmation and replaces the current state with the file’s contents. Images receive new identifiers during restoration to avoid overwriting existing images during transfer. Popups are not reopened from the backup.
 
-Se una foto necessaria manca dall’archivio locale, l’esportazione segnala l’errore. Se il download non riesce dalla PWA, prova ad aprire il sito nel browser che contiene i dati e ripeti il backup.
+If a required photo is missing from local storage, export reports an error. If downloading from the installed PWA fails, try opening the site in the browser that holds the data and repeat the backup.
 
-Cancellare i dati del sito elimina anche gli archivi locali. Prima di farlo, scarica un backup completo. In caso di spazio esaurito, l’app mostra un avviso di salvataggio.
+Clearing site data also deletes local storage databases. Download a full backup first. The app displays a save warning when storage is full.
 
-### Migrazione dei dati precedenti
+### Migrating older data
 
-Il passaggio allo schema v2 migra il vecchio registro degli esercizi, le chiavi delle sessioni e i tempi di recupero. Prima della migrazione può essere proposto un backup. Lo schema dello stato e la versione del formato di backup sono due numerazioni distinte.
+The schema v2 migration converts the old exercise log, session keys, and rest times. A backup may be offered before migration. The app-state schema and backup-file format use separate version numbers.
 
-## Struttura e avvio locale
+## Project structure and local development
 
-Il frontend non richiede una compilazione: HTML, CSS e JavaScript sono serviti come file statici.
+The project consists of a static frontend and three server functions for push notifications. The frontend requires no build step.
 
-| File o directory | Ruolo |
+| Repository path | Role |
 | --- | --- |
-| `index.html` | Pagina iniziale, caricamento di script/stile e registrazione del service worker. |
-| `script.js` | Import, interfaccia, allenamenti, parser, note, foto, timer, editor e scambio dati. |
-| `style.css` | Layout, temi e adattamento ai dispositivi. |
-| `manifest.json` | Metadati per l’installazione PWA. |
-| `sw.js` | Gestione delle notifiche e della loro apertura, secondo la configurazione del progetto. |
-| `coach.jpg` | Immagine e icona richiamate dall’app. |
-| `api/vapid.js` | Endpoint della chiave pubblica push. |
-| `api/subscribe.js` | Gestione delle sottoscrizioni push. |
-| `api/cron.js` | Invio dei promemoria dal server. |
-| `package.json`, `vercel.json` | Dipendenze e configurazione del progetto completo. |
+| `index.html` | Entry page, loading JSZip, script, and stylesheet, and registering the service worker. |
+| `script.js` | DOCX import, interface, workouts, parser, notes, photos, timers, editor, CSV, and push client. |
+| `style.css` | Layout, themes, and device adaptation. |
+| `coach.jpg` | Home image, app icon, and notification image. |
+| `manifest.json` | PWA installation: name, colors, `/` start URL, and standalone display. |
+| `sw.js` | Receiving push messages, displaying notifications, and opening the app. |
+| `api/vapid.js` | Returns the public VAPID key to the client. |
+| `api/subscribe.js` | Saves or removes subscriptions in Redis. |
+| `api/cron.js` | Sends reminders to registered subscriptions. |
+| `package.json` | ESM Node modules and dependencies: `web-push` (`^3.6.7`) and `@upstash/redis` (`^1.34.0`). |
+| `vercel.json` | Two cron schedules and service worker headers. |
+| `README.md` | Usage, configuration, and maintenance instructions. |
 
-Il pacchetto delle correzioni frontend contiene `index.html`, `script.js` e `style.css`: gli altri file vanno conservati dal progetto originale.
+**The three files `subscribe.js`, `cron.js`, and `vapid.js` must be inside `api/`**, even if individual attachments were downloaded without their folder path. Rename downloaded files such as `index(4).html`, `script(6).js`, `style(5).css`, and `README(2).md` to `index.html`, `script.js`, `style.css`, and `README.md`, respectively.
 
-### Solo interfaccia
+### Running the interface locally
 
-Nella cartella con i file dell’app:
+From the app directory:
 
 ```bash
 python3 -m http.server 8000
 ```
 
-Apri `http://localhost:8000`. Le API push non sono fornite da questo server statico. Per la lettura DOCX serve anche il caricamento di JSZip.
+Open `http://localhost:8000`. This server runs the interface but does not execute `/api/*` functions. DOCX import requires JSZip to be available from the CDN.
 
-### Progetto completo
+### Running with Vercel functions
 
-Se hai anche `package.json`, API e configurazione Vercel:
+Install dependencies and link the directory to the Vercel project:
 
 ```bash
 npm install
+npx vercel link
+npx vercel env pull .env.local
 npx vercel dev
 ```
 
-Per le API servono le relative variabili d’ambiente. L’installabilità PWA non garantisce il funzionamento offline: questo dipende dalle strategie di cache effettivamente presenti in `sw.js`.
+APIs require credentials for the relevant environment. If `vercel dev` requests a Development Command for the Other preset, configure a static server listening on the port specified by Vercel. The project does not define npm `dev`, `build`, or `test` scripts.
 
-## Notifiche e pubblicazione
+The `.env.local` file contains secrets: exclude it from the repository. Local development does not automatically run cron schedules; call the endpoint to test them.
 
-Da **Piano** puoi attivare/disattivare le notifiche ed eseguire una prova. Il client usa `/api/vapid` e `/api/subscribe`; l’invio pianificato richiede il backend del progetto e un servizio di pianificazione configurato.
+### Service worker and offline use
 
-La configurazione del progetto completo descritta nel README precedente utilizza Vercel, Web Push e Redis/Upstash. Prima del deploy verifica i file server e i nomi delle variabili richiesti dalla versione del backend in uso.
+The supplied `sw.js` handles `install`, `activate`, `push`, and `notificationclick` events. It does not cache pages, scripts, or documents: **this version does not guarantee offline use**, even though it is installable as a PWA.
 
-| Variabile | Uso previsto nel progetto |
+The headers in `vercel.json` configure `/sw.js` with:
+
+- `Cache-Control: no-cache, no-store, must-revalidate`;
+- `Service-Worker-Allowed: /`.
+
+## Notifications and deployment
+
+### 1. Prepare and import the repository
+
+1. Organize every file using the names and paths in the table above.
+2. Upload the complete project to GitHub, including `api/`, the image, manifest, and Vercel configuration.
+3. On [Vercel](https://vercel.com), create a project and import the repository.
+4. Set **Root Directory** to the directory containing `index.html`, `package.json`, `vercel.json`, and `api/`.
+5. Select **Framework Preset: Other**. This project has no build step: leave Build Command empty, enabling its override if needed. Static files are in the root; do not select a nonexistent `dist` directory. For this structure, Output Directory is `.`.
+6. Keep dependency installation from `package.json` enabled and configure the environment variables before the final deployment.
+
+Reference: [Vercel build configuration](https://vercel.com/docs/builds/configure-a-build).
+
+### 2. Configure Redis / Upstash
+
+Create an Upstash Redis database and connect its credentials to the Vercel project through the available integration or environment variables.
+
+The code accepts either pair:
+
+| REST URL | REST token |
 | --- | --- |
-| `VAPID_PUBLIC_KEY` | Chiave pubblica Web Push. |
-| `VAPID_PRIVATE_KEY` | Chiave privata Web Push, solo server. |
-| `VAPID_SUBJECT` | Contatto del mittente, per esempio un indirizzo `mailto:`. |
-| `CRON_SECRET` | Protezione dell’endpoint dei promemoria. |
-| Variabili Redis/Upstash | Accesso all’archivio delle sottoscrizioni, secondo il backend. |
+| `UPSTASH_REDIS_REST_URL` | `UPSTASH_REDIS_REST_TOKEN` |
+| `KV_REST_API_URL` | `KV_REST_API_TOKEN` |
 
-L’orario effettivo dei promemoria dipende dalla configurazione del cron. Non è fissato dal solo frontend. Le pianificazioni UTC richiedono attenzione al passaggio tra ora solare e ora legale italiana.
+One complete pair for the same database is sufficient. When both prefixes are present, the code prefers `UPSTASH_*` variables.
 
-Toccando una notifica, i parametri `?prompt=1` o `?from=notif` permettono al client di aprire la scelta del giorno. Il popup può comparire anche al primo accesso della giornata se questa non è stata registrata.
+Redis stores push subscriptions: the `push:subs` set contains references to `push:…` records. Workouts and photos stay on the device, rather than in this database.
 
-Le sottoscrizioni push non costituiscono un account di sincronizzazione degli allenamenti.
+### 3. Generate VAPID keys
 
-## Aggiornamento dei file
+Generate a Web Push key pair:
 
-1. Scarica un backup dei dati dall’app.
-2. Estrai il pacchetto e sostituisci i file frontend con i nomi **`index.html`**, **`script.js`** e **`style.css`**.
-3. Conserva manifest, service worker, immagini, API e configurazione già presenti nel progetto.
-4. Pubblica l’aggiornamento e ricarica l’app.
+```bash
+npx web-push generate-vapid-keys
+```
 
-Le versioni nei riferimenti `script.js?v=…` e `style.css?v=…` aiutano a richiedere i file aggiornati. Per mantenere l’accesso ai dati locali usa lo stesso indirizzo e lo stesso ambiente browser/PWA.
+Copy the Public Key and Private Key to the corresponding project variables. `/api/vapid` supplies the public key to the app; the private key remains on the server. Keep the same pair across updates. If you change it, you may need to disable and re-enable notifications on the devices.
 
-## Problemi frequenti
+### 4. Set environment variables
 
-| Problema | Controllo o soluzione |
+In the Vercel project’s **Environment Variables** settings, configure **Production**. Configure the relevant environments as well if you need the backend in preview deployments or local development.
+
+| Name | Value |
 | --- | --- |
-| Il documento non viene importato | Usa `.docx` e verifica tabelle, intestazioni SETT e righe GIORNO. |
-| JSZip non è disponibile | Controlla la connessione e l’accesso al CDN. |
-| Il carico non viene calcolato | Controlla classificazione, massimale e riferimento della percentuale. |
-| Un blocco dipendente non si completa | Registra prima il MAV o il top set da cui dipende. |
-| Oggi mostra ancora la vecchia prescrizione | Applica la bozza in Programma. |
-| Le note precedenti non compaiono | Verifica che l’allenamento sia salvato e l’esercizio riconosciuto; la sessione corrente e le settimane future della stessa scheda sono escluse. |
-| Una foto non è disponibile | Serve il database immagini del dispositivo oppure un backup completo con le foto. Il CSV non le contiene. |
-| Il timer iPhone continua dopo Annulla | È il comportamento previsto: fermalo dai controlli di sistema dell’iPhone. |
-| Il recupero del browser non suona in background | Controlla permessi e volume; su iPhone configura il timer di sistema. |
-| I dati non compaiono su un altro dispositivo | Trasferiscili con il backup JSON. |
-| Gli indicatori del Piano sembrano errati | Controlla le registrazioni nello Storico, da cui il Piano viene ricostruito. |
-| L’interfaccia mostra ancora la versione precedente | Ricarica l’app e verifica di aver pubblicato insieme HTML, script e CSS aggiornati. |
-| Compare un avviso di spazio esaurito | Scarica il backup prima di cancellare dati o effettuare altre modifiche. |
-| Le notifiche non funzionano | Verifica permessi, apertura dalla Home su iPhone e configurazione delle API. |
+| `VAPID_PUBLIC_KEY` | Public Key generated in the previous step. |
+| `VAPID_PRIVATE_KEY` | Private Key from the same pair. |
+| `VAPID_SUBJECT` | Sender contact, such as `mailto:your-email@example.com`. |
+| `CRON_SECRET` | A private random string used to authorize cron calls. |
+| `UPSTASH_REDIS_REST_URL` | Database REST URL, or `KV_REST_API_URL`. |
+| `UPSTASH_REDIS_REST_TOKEN` | Database REST token, or `KV_REST_API_TOKEN`. |
 
-## Verifica delle modifiche
+To generate a random secret, if OpenSSL is available:
 
-Per una verifica funzionale controlla importazione DOCX, completamento singolo e totale degli esercizi, monolaterali, sblocco, note nelle settimane successive, apertura foto, annullamento del recupero, backup/ripristino e import/export CSV.
+```bash
+openssl rand -hex 32
+```
 
-Il README precedente elencava una suite nella cartella `tests/`. Se presente nel repository completo, consulta il relativo `tests/README-TEST.md` per dipendenze e comandi. Questo documento non certifica l’esecuzione di quella suite né risultati numerici dei test.
+Example `.env.local`, to fill with your own values and exclude from version control:
+
+```dotenv
+VAPID_PUBLIC_KEY=YOUR_PUBLIC_KEY
+VAPID_PRIVATE_KEY=YOUR_PRIVATE_KEY
+VAPID_SUBJECT=mailto:your-email@example.com
+CRON_SECRET=YOUR_RANDOM_SECRET
+UPSTASH_REDIS_REST_URL=YOUR_REDIS_URL
+UPSTASH_REDIS_REST_TOKEN=YOUR_REDIS_TOKEN
+```
+
+Redeploy after adding or changing variables. Do not put the private key, Redis token, or cron secret in HTML, client-side JavaScript, or the repository.
+
+### 5. Install the app and enable notifications
+
+**iPhone:** open the HTTPS URL in Safari, choose **Share → Add to Home Screen**, launch the app from its icon, and go to **Plan → Attiva notifiche (Enable notifications)**. Allow notifications when prompted.
+
+**Android:** open the HTTPS URL in a compatible browser, install the app through its menu, and enable notifications from Plan.
+
+Activation retrieves the public key, creates or reuses the device subscription, and sends it to `/api/subscribe`. Disabling notifications asks the server to remove the subscription and unsubscribes locally.
+
+### 6. Configured cron schedules
+
+The supplied `vercel.json` contains the following entries:
+
+```json
+{
+  "crons": [
+    { "path": "/api/cron", "schedule": "0 5 * * *" },
+    { "path": "/api/cron", "schedule": "0 6 * * *" }
+  ]
+}
+```
+
+| Schedule | UTC | Italy, standard time | Italy, daylight saving time |
+| --- | --- | --- | --- |
+| `0 5 * * *` | 05:00 | 06:00 | 07:00 |
+| `0 6 * * *` | 06:00 | 07:00 | 08:00 |
+
+**These trigger two sends per day**, rather than alternatives automatically selected according to daylight saving time. `cron.js` does not filter by time zone or check whether the user has already logged training or rest. Each authorized invocation attempts delivery to every subscription.
+
+Notifications use the same tag, `allenamento-mattina`. The device may group or replace them, but the tag does not prevent the second server-side send.
+
+For a single send at 07:00 Italian time, keep one expression and adjust it when the clocks change, or use an external scheduler set to **Europe/Rome** and disable duplicate Vercel schedules. The scheduler must authenticate requests as described below.
+
+On Vercel Hobby, each cron job must run no more frequently than once per day and may start at any point during the scheduled hour. Check the [current cron limits](https://vercel.com/docs/cron-jobs/usage-and-pricing) before changing the frequency.
+
+### 7. Cron authentication and testing
+
+With `CRON_SECRET` configured, Vercel automatically includes its value in the `Authorization: Bearer …` header. This project’s backend also accepts `x-cron-secret` or the `key` query parameter.
+
+For an external scheduler, prefer the authorization header. If the service only supports a URL, the accepted format is `https://YOUR-PROJECT.vercel.app/api/cron?key=YOUR_SECRET`; treat the entire URL as private.
+
+Example manual request using your own environment variables:
+
+```bash
+curl --fail-with-body \
+  -H "Authorization: Bearer ${CRON_SECRET}" \
+  "https://YOUR-PROJECT.vercel.app/api/cron"
+```
+
+**This request actually sends a notification to every subscribed device.** Do not repeatedly invoke it as a simple availability check.
+
+Useful responses:
+
+| Result | Meaning |
+| --- | --- |
+| `401 Unauthorized` | Secret missing or not matching. |
+| `200`, `sent: 0`, `No subscribers` | No subscriptions registered. |
+| `200`, with `sent`, `failed`, and `cleaned` | Successful sends, failed sends, and removed subscriptions. |
+| `500` | Check credentials, dependencies, and function logs. |
+
+The cron removes expired subscriptions reported with 404/410 errors. It sends a payload with `coach.jpg`, high priority, and a 12-hour TTL.
+
+The **Invia notifica di prova (Send test notification)** button in Plan instead calls `showNotification` on the device. It confirms local display, but **does not test Redis or server-side Web Push delivery**. To check the complete flow, enable notifications, make one authorized cron test call, and inspect the result and logs.
+
+Reference: [Managing and securing Vercel cron jobs](https://vercel.com/docs/cron-jobs/manage-cron-jobs).
+
+### 8. Opening a notification
+
+`sw.js` displays the received message with its icon and, where supported, image. Clicking it focuses an existing app window or opens one, navigating to `/?prompt=1`.
+
+The client recognizes `?prompt=1` and `?from=notif` and opens the training/rest selection. This selection may also appear on the first visit of the day if no answer has been recorded.
+
+The service worker requests that the notification remain visible until interaction, but image rendering and persistence depend on the system. Push subscriptions do not sync workouts between devices.
+
+## Updating the files
+
+1. Download a complete data backup from the app.
+2. Update changed repository files using their actual names. For frontend fixes, these are `index.html`, `script.js`, and `style.css`.
+3. Keep `coach.jpg`, `manifest.json`, `sw.js`, `package.json`, `vercel.json`, and `api/` in the complete project.
+4. Push to the branch connected to Vercel or deploy with the CLI. After environment-variable changes, create a new deployment.
+5. Check deployment status and, for notifications, function logs and cron schedules. Then reload the app.
+
+Versioned references such as `script.js?v=…` and `style.css?v=…` help request updated assets. Use the same domain and browser/PWA environment to retain access to local data. A normal file update does not require clearing site data.
+
+## Troubleshooting
+
+| Problem | Check or solution |
+| --- | --- |
+| The document will not import | Use `.docx` and check tables, SETT headers, and GIORNO rows. |
+| JSZip is unavailable | Check connectivity and CDN access. |
+| Weight is not calculated | Check classification, max, and the percentage reference. |
+| A dependent block cannot be completed | Record its reference MAV or top set first. |
+| Today still shows the old prescription | Apply the draft in Program. |
+| Previous notes do not appear | Check that the workout was saved and the exercise recognized. The current session and future weeks of the same program are excluded. |
+| A photo is unavailable | You need the device’s image database or a full backup containing photos. CSV does not contain them. |
+| The iPhone timer continues after Cancel | This is expected: stop it using the iPhone’s system controls. |
+| The browser rest timer is silent in the background | Check permissions and volume; on iPhone, configure the system timer. |
+| Data is missing on another device | Transfer it using the JSON backup. |
+| Plan indicators look wrong | Check History records, which are used to rebuild the Plan. |
+| The interface still shows an older version | Reload the app and verify that updated HTML, script, and CSS were deployed together. |
+| A storage-full warning appears | Download a backup before clearing data or making further changes. |
+| Notifications do not work | Check permissions, Home Screen launch on iPhone, the VAPID endpoint, and subscription saving. Then check Redis and cron logs. |
+| `/api/vapid` returns 500 | Configure `VAPID_PUBLIC_KEY` and redeploy. |
+| `/api/subscribe` returns 500 | Check the Redis REST URL/token and their availability in the deployed environment. |
+| `/api/cron` returns 401 | Check `CRON_SECRET`, the authorization header, and that a deployment followed the variable change. |
+| Two reminders arrive each day | The supplied configuration contains two cron jobs: choose the schedule you want. |
+| The local notification test works, but reminders do not | The test button does not call the server. Check the subscription, Redis, and cron invocation. |
+| A function returns 404 | All three backend files must be in `api/` under the Vercel project’s Root Directory. |
+
+## Checking changes
+
+For a functional check, cover DOCX import, individual and full exercise completion, unilateral sets, unlocking, notes in later weeks, photo viewing, rest cancellation, backup/restore, and CSV import/export.
+
+An earlier README listed a test suite under `tests/`. If that directory is present in the complete repository, see `tests/README-TEST.md` for dependencies and commands. This document does not certify that the suite has been run or report numerical test results.
